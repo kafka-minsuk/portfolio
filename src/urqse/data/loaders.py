@@ -29,11 +29,11 @@ def read_travel(path):
 
 
 def to_county_data(df: pd.DataFrame, fips, t, dist) -> CountyData:
-    """Wages in units of the state's mean non-farm earnings per job (as in synthetic.py)."""
+    """Wages in units of the state's mean non-farm earnings per non-farm worker (as in synthetic.py).
+    Per worker (HU, ACS heads), not per BEA job, because wA_obs_usd is per farm worker."""
     if list(fips) != list(df["fips"]):
         raise ValueError("travel matrix rows do not match the county table")
-    counties = df["kind"] != "external"
-    mean_nonfarm = df.loc[counties, "nonfarm_earn_usd"].sum() / df.loc[counties, "HU_bea"].sum()
+    mean_nonfarm = usd_per_wage_unit(df)
 
     def col(name):
         return df[name].to_numpy(float)
@@ -44,6 +44,12 @@ def to_county_data(df: pd.DataFrame, fips, t, dist) -> CountyData:
         wA_obs=col("wA_obs_usd") / mean_nonfarm, mean_nonfarm_wage=1.0,
         omega=col("omega"), gateway=col("gateway"), dist=dist, t=t,
     )  # fmt: skip
+
+
+def usd_per_wage_unit(df: pd.DataFrame) -> float:
+    """State non-farm earnings per non-farm worker: the dollar value of one model wage unit."""
+    counties = df["kind"] != "external"
+    return float(df.loc[counties, "nonfarm_earn_usd"].sum() / df.loc[counties, "HU"].sum())
 
 
 def load_state(state: str = "IA", year: int = 2022, root: Path = DATA_ROOT) -> CountyData:

@@ -52,6 +52,16 @@ def test_fill_suppressed_allocates_residual_by_weight():
         bs.fill_suppressed(np.array([10.0, np.nan]), 5.0, np.ones(2))
 
 
+def test_farm_wage_per_job_indexes_years_to_the_base_year():
+    # county 0 pays 0.5 of the state non-farm wage every year; county 1 pays 0.4 then 0.6
+    index = np.array([40_000.0, 50_000.0])
+    ws_jobs = np.array([[10.0, 4.0], [20.0, 5.0]])
+    comp = np.array([[0.5 * 40_000 * 10, 0.4 * 40_000 * 4], [0.5 * 50_000 * 20, 0.6 * 50_000 * 5]])
+    np.testing.assert_allclose(bs.farm_wage_per_job(comp, ws_jobs, index), [25_000.0, 25_000.0])
+    with pytest.raises(ValueError, match="positive"):
+        bs.farm_wage_per_job(comp * np.array([[1.0, np.nan], [1.0, 1.0]]), ws_jobs, index)
+
+
 def test_county_kinds():
     kind = bs.county_kinds(["a", "b", "c", "d"], np.array([5.0, 9.0, 50.0, 1.0]), metro={"a", "b"})
     assert kind.tolist() == ["suburb", "core", "rural", "rural"]
@@ -235,7 +245,7 @@ def test_loader_builds_county_data_that_calibrates(tmp_path):
     data = load_state("IA", 2022, root=tmp_path)
     assert data.N.shape == (3,) and data.t.shape == (3, 3)
     assert data.kind[data.core] == "core" and data.kind[-1] == "external"
-    mean_nonfarm = (1500 * 60_000 + 300 * 50_000) / 1800
+    mean_nonfarm = (1500 * 60_000 + 300 * 50_000) / (1100 + 220)  # per non-farm worker (HU), not per BEA job
     np.testing.assert_allclose(data.wA_obs, _table()["wA_obs_usd"] / mean_nonfarm)
     cal = calibrate(data, Params())
     assert cal.wage_info.converged and max(cal.max_rel_error.values()) < 1e-7
@@ -287,6 +297,10 @@ def test_iowa_build_snapshot():
     assert c["pop"].sum() == 3_200_517  # PEP Vintage 2022, Iowa July 1 2022
     assert c["HA_bea"].sum() == 89_652 and c["HU_bea"].sum() == 2_024_343  # BEA CAEMP25N 2022 L70, L80
     assert c.loc[c["kind"] == "core", "name"].item() == "Polk"
+    # farm wage = labour bill per farm worker, so w_A,obs x H_A is the bill in dollars (no job-scaling loss)
+    np.testing.assert_allclose(c["wA_obs_usd"] * c["HA"], c["farm_labour_bill_usd"], rtol=1e-12)
+    assert c["farm_comp_usd"].sum() == 881_933_000  # BEA CAINC45 2022 L350 + L360
+    np.testing.assert_allclose(c["wA_bea_earn_usd"], c["farm_earn_usd"] / c["HA_bea"])
     data = load_state("IA", 2022)
     assert data.t.shape == (100, 100) and np.isclose(data.N.sum(), data.HU.sum() + data.HA.sum())
 

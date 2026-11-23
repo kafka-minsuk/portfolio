@@ -47,7 +47,7 @@ COUNTY_SCHEMA = pa.DataFrameSchema(
         "HA": _model(),  # farm jobs (worker-equivalents)
         "L": _model(),  # floor space, m^2
         "TF": _model(),  # farmland in use, hectares
-        "wA_obs_usd": _model(),  # farm earnings per farm job, $
+        "wA_obs_usd": _model(),  # farm labour earnings per farm worker, $ (= farm_labour_bill_usd / HA)
         "omega": _model(_share),  # owner-operated share of farmland
         "gateway": _model(_nonneg),  # immigrant gateway weight, state mean 1
         "own_time_min": _model(),
@@ -61,6 +61,10 @@ COUNTY_SCHEMA = pa.DataFrameSchema(
         "HA_bea": _source(),  # BEA farm employment (jobs, incl. proprietors)
         "HA_prop_bea": _source(),  # BEA farm proprietors employment
         "farm_earn_usd": _source(None),  # BEA farm earnings, $ (can be negative)
+        "farm_comp_usd": _source(),  # BEA farm wages and salaries + supplements, $
+        "farm_labour_bill_usd": _source(),  # multi-year farm compensation per wage job x BEA farm jobs, $
+        "wA_bea_earn_usd": _source(None),  # BEA farm earnings per BEA farm job, $ (the M3 wA_obs)
+        "hired_labor_coa_usd": _source(),  # Census of Agriculture hired farm labour expense, $
         "nonfarm_earn_usd": _source(None),  # BEA non-farm earnings, $
         "wU_obs_usd": _source(None),  # non-farm earnings per non-farm job, $
         "pasture_ha": _source(),  # CDL grassland/pasture

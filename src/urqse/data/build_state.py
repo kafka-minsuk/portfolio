@@ -39,6 +39,9 @@ OSRM = "https://router.project-osrm.org/table/v1/driving"
 OSRM_MAX_COORDS = 100  # public demo server limit (HTTP 400 "TooBig" above 100, tested 2026-11-23)
 NASS_INDEX = "https://www.nass.usda.gov/datasets"
 NASS_BASE = "https://www.nass.usda.gov/sites/default/files/datasets/"
+# Years in the farm-wage mean (base year and the 4 before). source=BEA CAINC45 L350+L360 and
+# CAEMP25N L70-L50 are annual by county; 5 years smooths small-county noise.  # VERIFY
+FARM_WAGE_YEARS = 5
 
 
 # GHSL 1000 km tiles covering the state (row = 9000 km north edge down, col = 18041 km west edge east).
@@ -268,6 +271,21 @@ def reconcile_jobs(workers_res, workers_out, workers_work, HU_bea, HA_bea) -> di
     }
 
 
+def farm_wage_per_job(comp, ws_jobs, wage_index) -> np.ndarray:
+    """Farm labour earnings per farm job in base-year dollars (spec §5 'observed farm earnings').
+
+    comp, ws_jobs: (years, counties) farm compensation (wages + supplements) and farm wage-and-
+    salary jobs; wage_index: (years,) the state's non-farm earnings per non-farm job. The county's
+    compensation per wage job is averaged over the years relative to the index, then put at the
+    last (base) year's index, so the mean smooths single-year noise without dragging the level
+    back by wage growth. The same per-job wage prices every farm job, proprietors included."""
+    comp, ws_jobs, wage_index = (np.asarray(v, float) for v in (comp, ws_jobs, wage_index))
+    rel = comp / ws_jobs / wage_index[:, None]
+    if not np.all(np.isfinite(rel) & (rel > 0)):
+        raise ValueError("farm compensation per wage job must be positive and published in every year")
+    return rel.mean(axis=0) * wage_index[-1]
+
+
 def county_kinds(fips, HU, metro: set) -> np.ndarray:
     """core = the metro county with the most non-farm jobs; suburb = other metro counties;
     rural = non-metro. # VERIFY: a single core is a model simplification for a multi-metro state."""
@@ -411,10 +429,11 @@ def build(state: str, year: int, raw: Path, out: Path) -> dict:
 
     # BEA jobs and earnings
     emp = read_bea(files["bea_emp"], state, year, {"HA_bea": 70, "HU_bea": 80, "HA_prop_bea": 50, "jobs_bea": 10})
-    farm = read_bea(files["bea_farm"], state, year, {"farm_earn": 370})
+    farm = read_bea(files["bea_farm"], state, year, {"farm_earn": 370, "farm_ws": 350, "farm_supp": 360})
     earn = read_bea(files["bea_earn"], state, year, {"nonfarm_earn": 82, "farm_earn_cainc5n": 81})
     st = f"{sf}000"
     bea = pd.concat([emp, farm, earn], axis=1)
+    bea["farm_comp"] = bea["farm_ws"] + bea["farm_supp"]
     # ACS workers and recent immigrants; PEP population
     acs = pd.concat([
         read_acs(files["acs_b08007"], {"B08007_E001": "workers_res", "B08007_E005": "workers_out_state"}, sf),
@@ -434,6 +453,7 @@ def build(state: str, year: int, raw: Path, out: Path) -> dict:
         df[c] = bea[c].reindex(fips)
     df["farm_earn_usd"] = bea["farm_earn"].reindex(fips) * 1e3
     df["nonfarm_earn_usd"] = bea["nonfarm_earn"].reindex(fips) * 1e3
+
 
     # rasters: farmland (CDL) and floor space (GHSL)
     geoms_cdl = list(shp.loc[fips].to_crs(5070).geometry)
@@ -485,13 +505,35 @@ def build(state: str, year: int, raw: Path, out: Path) -> dict:
     for name, s in (("land_value_usd_acre", value), ("owned_acres", owned), ("rented_acres", rented)):
         gaps += [dict(var=name, fips=f, rule="(D) in Census of Ag; see fills above") for f in s["suppressed"]]
 
+    # farm labour earnings: compensation per farm wage-and-salary job, FARM_WAGE_YEARS mean,
+    # applied to every BEA farm job (hired and proprietor) -> the county's farm labour bill in $
+    wage_years = range(year - FARM_WAGE_YEARS + 1, year + 1)
+    comp, ws_jobs, index = [], [], []
+    for y in wage_years:
+        f_y = read_bea(files["bea_farm"], state, y, {"ws": 350, "supp": 360}) * 1e3
+        e_y = read_bea(files["bea_emp"], state, y, {"farm": 70, "prop": 50, "nonfarm": 80})
+        nfe_y = read_bea(files["bea_earn"], state, y, {"nfe": 82}).loc[st, "nfe"] * 1e3
+        comp.append((f_y["ws"] + f_y["supp"]).reindex(fips).to_numpy(float))
+        ws_jobs.append((e_y["farm"] - e_y["prop"]).reindex(fips).to_numpy(float))
+        index.append(nfe_y / e_y.loc[st, "nonfarm"])
+    df["farm_comp_usd"] = comp[-1]
+    df["farm_labour_bill_usd"] = farm_wage_per_job(comp, ws_jobs, index) * df["HA_bea"]
+    df["wA_bea_earn_usd"] = df["farm_earn_usd"] / df["HA_bea"]
+    hired = nass_series(nass, "LABOR, HIRED - EXPENSE, MEASURED IN $", 2022, "CENSUS", sf)
+    contract = nass_series(nass, "LABOR, CONTRACT - EXPENSE, MEASURED IN $", 2022, "CENSUS", sf)
+    df["hired_labor_coa_usd"] = hired["county"].reindex(fips)
+    gaps += [dict(var="hired_labor_coa_usd", fips=f, rule="(D) in Census of Ag; left null (comparison column only)")
+             for f in hired["suppressed"]]  # fmt: skip
+    farm_wage = dict(years=(wage_years[0], wage_years[-1]), index=index,
+                     comp_per_ws_job=[c.sum() / j.sum() for c, j in zip(comp, ws_jobs)])
+
     # jobs = workers with the external zone
     jobs = reconcile_jobs(*(df[c].to_numpy(float) for c in ("workers_res", "workers_out_state", "workers_work", "HU_bea", "HA_bea")))
-    df["wA_obs_usd"] = df["farm_earn_usd"] / df["HA_bea"]
+    df["wA_obs_usd"] = df["farm_labour_bill_usd"] / jobs["HA"][:Z]  # $ per farm worker (ACS head)
     df["wU_obs_usd"] = df["nonfarm_earn_usd"] / df["HU_bea"]
     bad_wA = df.index[~(df["wA_obs_usd"] > 0)]
     if len(bad_wA):
-        raise ValueError(f"non-positive farm earnings per job in {list(bad_wA)}; needs a documented rule")
+        raise ValueError(f"non-positive farm labour earnings in {list(bad_wA)}; needs a documented rule")
     df["gateway"] = (df["fb_recent"] / df["workers_res"]) / (df["fb_recent"].sum() / df["workers_res"].sum())
     df["kind"] = county_kinds(fips, df["HU_bea"].to_numpy(), read_metro_counties(files["cbsa"]))
 
@@ -523,7 +565,7 @@ def build(state: str, year: int, raw: Path, out: Path) -> dict:
     # per worker / per farm job; nothing about it is observed beyond the commuter counts.
     df.loc[EXTERNAL_FIPS, "L"] = df.loc[cty, "L"].sum() / df.loc[cty, "N"].sum() * df.loc[EXTERNAL_FIPS, "N"]
     df.loc[EXTERNAL_FIPS, "TF"] = df.loc[cty, "TF"].sum() / df.loc[cty, "HA"].sum() * df.loc[EXTERNAL_FIPS, "HA"]
-    df.loc[EXTERNAL_FIPS, "wA_obs_usd"] = df.loc[cty, "farm_earn_usd"].sum() / df.loc[cty, "HA_bea"].sum()
+    df.loc[EXTERNAL_FIPS, "wA_obs_usd"] = df.loc[cty, "farm_labour_bill_usd"].sum() / df.loc[cty, "HA"].sum()
     df.loc[EXTERNAL_FIPS, "omega"] = df.loc[cty, "owned_acres"].sum() / (df.loc[cty, "owned_acres"].sum() + df.loc[cty, "rented_acres"].sum())
 
     from pyproj import Transformer
@@ -545,11 +587,12 @@ def build(state: str, year: int, raw: Path, out: Path) -> dict:
         "farm_earn_cainc5n_usd": bea.loc[st, "farm_earn_cainc5n"] * 1e3, "jobs_bea": bea.loc[st, "jobs_bea"],
         "owned_acres": owned["state"], "rented_acres": rented["state"], "farmland_census_ha": farmland["state"] * ACRE_HA,
         "cropland_census_ha": cropland["state"] * ACRE_HA, "cash_rent_usd_acre": rent["state"],
-        "land_value_usd_acre": value["state"],
+        "land_value_usd_acre": value["state"], "hired_labor_coa_usd": hired["state"],
+        "contract_labor_coa_usd": contract["state"], "farm_comp_usd": bea.loc[st, "farm_comp"] * 1e3,
     }  # fmt: skip
     meta = dict(state=state, year=year, sources=src, nass_file=nass_name, gaps=gaps, official=official,
                 neighbors=nb_fips, osrm_calls=n_calls, speed_km_per_min=speed, cdl_total_ha=cdl_total_ha,
-                scale=jobs["scale"], road_over_line=float(np.median(d_road[:Z, :Z][~np.eye(Z, dtype=bool)] / d_line[:Z, :Z][~np.eye(Z, dtype=bool)])),
+                scale=jobs["scale"], farm_wage=farm_wage, road_over_line=float(np.median(d_road[:Z, :Z][~np.eye(Z, dtype=bool)] / d_line[:Z, :Z][~np.eye(Z, dtype=bool)])),
                 raw=raw, built=dt.date.today().isoformat())  # fmt: skip
     (out / "REPORT.md").write_text(report(table, t, meta))
     return dict(table=table, t=t, dist=dist, meta=meta)
@@ -567,6 +610,7 @@ def report(table: pd.DataFrame, t: np.ndarray, meta: dict) -> str:
     e = table[table["kind"] == "external"].iloc[0]
     o = meta["official"]
     raw = meta["raw"]
+    fw = meta["farm_wage"]
     L = []
     L += [f"# {STATE_NAME[meta['state']]} {meta['year']} county data: validation report", "",
           f"Built {meta['built']} by `python -m urqse.data.build_state {meta['state']} {meta['year']}`. "
@@ -589,6 +633,8 @@ def report(table: pd.DataFrame, t: np.ndarray, meta: dict) -> str:
                        ("workers_work", "ACS workers by workplace"), ("workers_out_state", "ACS workers working out of state"),
                        ("HU_bea", "BEA non-farm employment (L80)"), ("HA_bea", "BEA farm employment (L70)"),
                        ("HA_prop_bea", "BEA farm proprietors (L50)"), ("farm_earn_usd", "BEA farm earnings $ (CAINC45 L370)"),
+                       ("farm_comp_usd", "BEA farm wages + supplements $ (CAINC45 L350 + L360)"),
+                       ("hired_labor_coa_usd", "CoA hired farm labour expense $"),
                        ("nonfarm_earn_usd", "BEA non-farm earnings $ (CAINC5N L82)"), ("fb_recent", "ACS foreign born entered 2010+"),
                        ("owned_acres", "CoA owned acres"), ("rented_acres", "CoA rented-from-others acres"),
                        ("farmland_census_ha", "CoA land in farms, ha"), ("cropland_census_ha", "CoA total cropland, ha")):  # fmt: skip
@@ -606,7 +652,7 @@ def report(table: pd.DataFrame, t: np.ndarray, meta: dict) -> str:
           f"out of state = {_fmt(e['HU'] + e['HA'])}, split by the state farm share (HA = {_fmt(e['HA'])}). Location: the "
           f"{len(meta['neighbors'])} out-of-state counties within {NEIGHBOR_BUFFER_M / 1e3:g} km of the state "
           f"({', '.join(meta['neighbors'])}); travel time from a county to the zone is the OSRM time to the nearest of them. "
-          "Floor space, farmland, farm earnings and owner share are state averages scaled to its workers / farm jobs; "
+          "Floor space, farmland, farm labour earnings and owner share are state averages scaled to its workers / farm jobs; "
           "gateway weight 0 (immigrants settle in-state). `# VERIFY` all of these are conventions, not data, and `log(0)` "
           "in `immigration.arrival_shares` needs handling in M3.",
           f"- **TF (farmland, ha).** CDL {meta['year']} crop, hay, fallow and tree-crop classes (codes 1-61, 66-77, 204-254), "
@@ -618,12 +664,31 @@ def report(table: pd.DataFrame, t: np.ndarray, meta: dict) -> str:
           "(the difference is water). `# VERIFY` whether pasture belongs in T^F for livestock counties.",
           f"- **L (floor space, m^2).** GHSL GHS-BUILT-V 2020 epoch building volume / {STOREY_HEIGHT_M:g} m storey height "
           f"(`# VERIFY` storey height; 2020 is the nearest epoch to {meta['year']}). State volume {_fmt(c['built_volume_m3'].sum() / 1e9, 2)} km^3.",
-          f"- **wA_obs_usd.** CAINC45 farm earnings (L370) / CAEMP25N farm employment (L70): state "
-          f"{_fmt(e['wA_obs_usd'])} $ per farm job; county range {_fmt(c['wA_obs_usd'].min())} to {_fmt(c['wA_obs_usd'].max())}. "
-          f"The loader divides by state non-farm earnings per non-farm job ({_fmt(c['nonfarm_earn_usd'].sum() / c['HU_bea'].sum())} $). "
-          f"`# VERIFY` vintage mismatch: CAINC45/CAEMP25N on the BEA site are the 2023-11-16 release, CAINC5N is the 2026 "
-          f"file; CAINC5N's revised {meta['year']} farm earnings are {_fmt(o['farm_earn_cainc5n_usd'])} $ vs CAINC45 "
-          f"{_fmt(o['farm_earn_usd'])} $. Single-year {meta['year']} farm income is volatile; a multi-year mean may suit M3 better. `# VERIFY` BEA farm earnings are proprietors' income plus farm wages, so they include owner-operators' returns to owned land and capital; read as a wage, wA_obs overstates farm labour earnings in high-rent counties (spec §12.1 separates operator land income).",
+          f"- **wA_obs_usd (farm labour earnings per farm worker).** Farm compensation (CAINC45 L350 wages and salaries + "
+          f"L360 supplements) per farm wage-and-salary job (CAEMP25N L70 - L50), mean of {fw['years'][0]} to {fw['years'][1]}, "
+          "each year relative to the state's non-farm earnings per non-farm job (CAINC5N L82 / CAEMP25N L80) and put at the "
+          f"{meta['year']} value ({_fmt(fw['index'][-1])} $). That per-job wage prices every BEA farm job, proprietors "
+          "included, giving the county farm labour bill `farm_labour_bill_usd`; wA_obs_usd = bill / HA, so it is per farm "
+          f"worker (ACS head) and the model's wage bill w_A H_A equals the bill in dollars. State: "
+          f"{_fmt(c['farm_labour_bill_usd'].sum() / c['HA_bea'].sum())} $ per BEA farm job, {_fmt(e['wA_obs_usd'])} $ per farm "
+          f"worker; county range {_fmt(c['wA_obs_usd'].min())} to {_fmt(c['wA_obs_usd'].max())} $ per worker. State compensation "
+          "per farm wage job by year: " + ", ".join(f"{y} {_fmt(v)} $" for y, v in zip(range(fw['years'][0], fw['years'][1] + 1), fw['comp_per_ws_job'])) + ". "
+          "Proprietors are priced at the hired wage per job (the market price of farm labour in the county) rather than at a "
+          "non-farm opportunity wage, which would assume away the farm/non-farm gap xi_A is meant to measure. `# VERIFY` the "
+          "proprietor imputation: a BEA proprietor job is any sole proprietor or partner, many part-time. Contract labour "
+          f"(CoA {_fmt(o['contract_labor_coa_usd'])} $) is left out: its workers are not BEA farm jobs (they are in "
+          "agricultural support services, non-farm). Census of Agriculture hired labour expense "
+          f"({_fmt(o['hired_labor_coa_usd'])} $ in 2022, column `hired_labor_coa_usd`) is "
+          f"{o['hired_labor_coa_usd'] / o['farm_comp_usd']:.2f}x BEA farm compensation ({_fmt(o['farm_comp_usd'])} $) and pays "
+          "a different universe (every hired head, including workers on the farm under 150 days), so it is a comparison "
+          "column, not the bill. `# VERIFY` that gap. The previous measure, BEA farm earnings (L370, wages + proprietors' income) "
+          f"per BEA farm job, is kept as `wA_bea_earn_usd`: state {_fmt(c['farm_earn_usd'].sum() / c['HA_bea'].sum())} $, county "
+          f"{_fmt(c['wA_bea_earn_usd'].min())} to {_fmt(c['wA_bea_earn_usd'].max())} $; it includes owner-operators' returns to "
+          "owned land and capital, which spec §12.1 pays separately. The loader divides wA_obs_usd by state non-farm earnings "
+          f"per non-farm worker (sum over counties of non-farm earnings / HU = {_fmt(c['nonfarm_earn_usd'].sum() / c['HU'].sum())} $), "
+          "so both sectors are per head. `# VERIFY` vintage mismatch: CAINC45/CAEMP25N are the 2023-11-16 release, CAINC5N "
+          f"the 2026 file (CAINC5N's revised {meta['year']} farm earnings are {_fmt(o['farm_earn_cainc5n_usd'])} $ vs CAINC45 "
+          f"{_fmt(o['farm_earn_usd'])} $).",
           f"- **omega.** Census of Agriculture 2022 owned / (owned + rented from others) acres in farms. "
           f"State {_fmt(e['omega'], 3)}, county range {_fmt(c['omega'].min(), 3)} to {_fmt(c['omega'].max(), 3)}.",
           f"- **cash_rent_usd_acre.** NASS Cash Rents Survey {meta['year']}, non-irrigated cropland. State {_fmt(o['cash_rent_usd_acre'])} $/acre.",
@@ -648,8 +713,8 @@ def report(table: pd.DataFrame, t: np.ndarray, meta: dict) -> str:
         L += [f"| {g['var']} | {g['fips']} {name.get(g['fips'], '')} | {g['rule']} |" for g in meta["gaps"]]
     else:
         L.append("None.")
-    L += ["", "No BEA (D) cells for this state and year: CAEMP25N L50/70/80, CAINC45 L370 and CAINC5N L82 are published "
-          "for every county. Census of Agriculture tenure and value cells are all published.", "",
+    L += ["", f"No BEA (D) cells for this state and year: CAEMP25N L50/70/80, CAINC45 L350/360/370 and CAINC5N L82 are published "
+          f"for every county ({fw['years'][0]} to {fw['years'][1]} for the farm-wage lines). Census of Agriculture tenure and value cells are all published.", "",
           "## Coverage gaps and caveats", "",
           "- ACS is the 5-year period estimate ending in the base year (no 1-year data for small counties); BEA and PEP are "
           "single-year. The external zone inherits ACS sampling error in the commuter totals.",
@@ -658,10 +723,11 @@ def report(table: pd.DataFrame, t: np.ndarray, meta: dict) -> str:
           "- Census of Agriculture is quinquennial (2022 matches the base year); the cash-rent survey is annual for Iowa.",
           "- No satellite population layer (GHS-POP) is used; census counts drive calibration (spec §8).", ""]
     L += ["## County table", "",
-          "| FIPS | Name | Kind | N | HU | HA | TF ha | L m^2 | wA $ | omega | rent $/ac |", "|---|---|---|---|---|---|---|---|---|---|---|"]
+          "| FIPS | Name | Kind | N | HU | HA | TF ha | L m^2 | wA $/worker | BEA farm earnings $/job | omega | rent $/ac |",
+          "|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for r in table.itertuples():
         L.append(f"| {r.fips} | {r.name} | {r.kind} | {_fmt(r.N)} | {_fmt(r.HU)} | {_fmt(r.HA)} | {_fmt(r.TF)} | "
-                 f"{_fmt(r.L / 1e6, 2)}M | {_fmt(r.wA_obs_usd)} | {_fmt(r.omega, 3)} | {_fmt(r.cash_rent_usd_acre)}"
+                 f"{_fmt(r.L / 1e6, 2)}M | {_fmt(r.wA_obs_usd)} | {_fmt(r.wA_bea_earn_usd)} | {_fmt(r.omega, 3)} | {_fmt(r.cash_rent_usd_acre)}"
                  f"{'*' if r.cash_rent_filled else ''} |")
     L += ["", "`*` filled, see above.", ""]
     return "\n".join(L)

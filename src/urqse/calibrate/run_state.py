@@ -9,14 +9,15 @@ and its xi_A map; --snapshot also rewrites the pinned numbers in tests/snapshots
 
 import argparse
 import json
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
 from ..data import build_state as bs
-from ..data.loaders import COUNTY_FILE, TRAVEL_FILE, read_county, read_travel, state_dir, to_county_data
+from ..data.loaders import COUNTY_FILE, TRAVEL_FILE, read_county, read_travel, state_dir, to_county_data, usd_per_wage_unit
+from ..model import land
 from ..model.params import Params
 from . import checks
 from .gravity import commuting_gravity
@@ -27,7 +28,7 @@ ESTIMATES_DIR = Path(__file__).resolve().parent / "estimates"
 SNAPSHOT_DIR = ROOT / "tests" / "snapshots"
 LODES_URL = "https://lehd.ces.census.gov/data/lodes/LODES8/{st}/od/{st}_od_{part}_JT00_{year}.csv.gz"
 NEIGHBOR_STATES = {"IA": ("il", "mn", "mo", "ne", "sd", "wi")}
-EARN_YEARS = 5  # multi-year mean of farm earnings for the theta_T robustness row
+EARN_YEARS = 5  # multi-year mean of BEA farm earnings for the M3 theta_T comparison row
 
 
 # --- tracked state estimates ---------------------------------------------------------------
@@ -95,16 +96,20 @@ def farm_earnings_mean(zip_path, state, year, fips, n_years=EARN_YEARS):
     return 1e3 * pd.concat(cols, axis=1).mean(axis=1).to_numpy(float), (years[0], years[-1])  # BEA $000
 
 
-def theta_T_table(df, wA_bill_usd, earn_mean) -> dict:
-    """theta_T by county under four definitions of the labour bill (report §3). Dollars."""
+def theta_T_table(df, earn_mean) -> dict:
+    """theta_T by county under each definition of the farm labour bill (report §4). Dollars."""
     rent_bill = df["cash_rent_usd_acre"].to_numpy(float) * df["TF"].to_numpy(float) / checks.HA_PER_ACRE
     E = df["farm_earn_usd"].to_numpy(float)
     omega = df["omega"].to_numpy(float)
+    jobs = df["HA_bea"].to_numpy(float)
+    per_ws_job = jobs / (jobs - df["HA_prop_bea"].to_numpy(float))  # every farm job at the wage-job rate
     labour = {
-        "model wage bill wA_obs x HA (spec §5 literal)": wA_bill_usd,
-        "BEA farm earnings as labour": E,
-        "BEA farm earnings net of owner-operators' land rent (chosen)": E - omega * rent_bill,
-        "same, 5-year mean farm earnings": earn_mean - omega * rent_bill,
+        CHOSEN_THETA: df["wA_obs_usd"].to_numpy(float) * df["HA"].to_numpy(float),
+        "same, single-year compensation per farm wage job": df["farm_comp_usd"].to_numpy(float) * per_ws_job,
+        "CoA hired labour expense per farm wage job, all farm jobs": df["hired_labor_coa_usd"].to_numpy(float) * per_ws_job,
+        "M3: BEA farm earnings as labour": E,
+        M3_THETA: E - omega * rent_bill,
+        "M3: same, 5-year mean farm earnings": earn_mean - omega * rent_bill,
     }
     return {
         name: {
@@ -115,8 +120,40 @@ def theta_T_table(df, wA_bill_usd, earn_mean) -> dict:
     }
 
 
-CHOSEN_THETA = "BEA farm earnings net of owner-operators' land rent (chosen)"
+def farm_income_accounts(cal, data, counties, usd, E) -> dict:
+    """Spec §12.1 income routing on the calibrated baseline, state totals in $: farm labour (hired
+    and operator wages), owner-operated land rent, landlord rent, against BEA farm earnings E
+    (wages + proprietors' income). The identity labour + owner rent + landlord rent = w_A H_A + rho T^F
+    holds by construction; the comparison with E shows what wA_obs already contains."""
+    w = cal.baseline.within
+    c = counties
+    HA, TF, omega = data.HA[c], data.TF[c], data.omega[c]
+    operator = land.operator_income(w.wA[c], w.rho[c], TF, HA, omega) * HA * usd
+    labour = w.wA[c] * HA * usd
+    owner_rent = operator - labour
+    landlord = land.landlord_income(w.rho[c], TF, omega) * usd
+    identity = (operator.sum() + landlord.sum()) / ((w.wA[c] * HA + w.rho[c] * TF).sum() * usd) - 1.0
+    return dict(labour=labour.sum(), owner_rent=owner_rent.sum(), landlord=landlord.sum(),
+                operator=operator.sum(), E=float(np.sum(E)), identity_rel=float(identity),
+                operator_over_E=float(operator.sum() / np.sum(E)))  # fmt: skip
+
+
+CHOSEN_THETA = "farm labour bill wA_obs x HA (chosen; spec §5 literal)"
+M3_THETA = "M3: BEA farm earnings net of owner-operators' land rent (M3 choice)"
 HEADLINE_GRAVITY = "in-state, off-diagonal (headline)"
+
+
+def overid_runs(cal0, cal, p0, p, counties, cdf, usd, pub) -> dict:
+    obs = cdf["cash_rent_usd_acre"].to_numpy(float)
+    TF = cdf["TF"].to_numpy(float)
+    out = {}
+    for label, c, q in (("theta_T = 0.40 (default)", cal0, p0), (f"theta_T = {p.theta_T:.3f} (estimated)", cal, p)):
+        model = checks.rent_usd_per_acre(c.baseline.within.rho[counties], usd)
+        o = checks.overid(model[pub], obs[pub], TF[pub])
+        o["model"] = model
+        o["theta_T"] = q.theta_T
+        out[label] = o
+    return out
 
 
 def run(state: str, year: int, raw: Path, ddir: Path) -> dict:
@@ -126,7 +163,7 @@ def run(state: str, year: int, raw: Path, ddir: Path) -> dict:
     counties = (df["kind"] != "external").to_numpy()
     cdf = df[counties].reset_index(drop=True)
     fips = cdf["fips"].tolist()
-    usd = float(cdf["nonfarm_earn_usd"].sum() / cdf["HU_bea"].sum())  # $ per model wage unit
+    usd = usd_per_wage_unit(df)  # $ per model wage unit (non-farm earnings per non-farm worker)
 
     files = {k: bs.fetch(v, raw) for k, v in bs.sources(state, year).items() if k in ("counties", "bea_farm")}
     shp = bs.read_counties(files["counties"])
@@ -139,9 +176,8 @@ def run(state: str, year: int, raw: Path, ddir: Path) -> dict:
     kl = gravity[HEADLINE_GRAVITY]
 
     # 3. theta_T from rent shares
-    wA_bill_usd = data.wA_obs[counties] * data.HA[counties] * usd
     earn_mean, earn_years = farm_earnings_mean(files["bea_farm"], state, year, fips)
-    theta = theta_T_table(cdf, wA_bill_usd, earn_mean)
+    theta = theta_T_table(cdf, earn_mean)
     theta_hat = theta[CHOSEN_THETA]["state"]
 
     # 1. inversion: default params, and the state estimates
@@ -151,25 +187,35 @@ def run(state: str, year: int, raw: Path, ddir: Path) -> dict:
 
     # 2. over-identification: model rho vs NASS cash rents (published counties only)
     pub = ~cdf["cash_rent_filled"].to_numpy(bool)
+    overid = overid_runs(cal0, cal, p0, p_state, counties, cdf, usd, pub)
     obs = cdf["cash_rent_usd_acre"].to_numpy(float)
     TF = cdf["TF"].to_numpy(float)
-    overid = {}
-    for label, c, p in (("theta_T = 0.40 (default)", cal0, p0), (f"theta_T = {theta_hat:.3f} (estimated)", cal, p_state)):
-        model = checks.rent_usd_per_acre(c.baseline.within.rho[counties], usd)
-        o = checks.overid(model[pub], obs[pub], TF[pub])
-        o["model"] = model
-        o["theta_T"] = p.theta_T
-        overid[label] = o
-    # how much of the level gap is the job scaling (ACS headcount / BEA jobs) in HA
+    bill = cdf["farm_labour_bill_usd"].to_numpy(float)
+    corr_log_farmland = float(np.corrcoef(np.log(bill / cdf["farmland_census_ha"].to_numpy(float))[pub], np.log(obs[pub]))[0, 1])
+    E = cdf["farm_earn_usd"].to_numpy(float)
+    accounts = farm_income_accounts(cal, data, counties, usd, E)
+
+    # M3 for comparison: wA_obs = BEA farm earnings per BEA job, wage unit per BEA non-farm job
+    usd_m3 = float(cdf["nonfarm_earn_usd"].sum() / cdf["HU_bea"].sum())
+    wA_m3 = df["wA_bea_earn_usd"].to_numpy(float).copy()
+    wA_m3[~counties] = E.sum() / cdf["HA_bea"].sum()
+    data_m3 = replace(data, wA_obs=wA_m3 / usd_m3)
+    p_m3 = Params(kappa_lam=kl.kappa_lam, theta_T=theta[M3_THETA]["state"])
+    cal0_m3, cal_m3 = calibrate(data_m3, p0), calibrate(data_m3, p_m3)
     scale = (cdf["HA"] / cdf["HA_bea"]).to_numpy(float)
-    unscaled = overid["theta_T = 0.40 (default)"]["model"] / scale
-    unscaled_ratio = float(np.sum(unscaled[pub] * TF[pub]) / np.sum(obs[pub] * TF[pub]))
+    overid_m3 = overid_runs(cal0_m3, cal_m3, p0, p_m3, counties, cdf, usd_m3, pub)
+    m3 = dict(
+        data=data_m3, p=p_m3, cal0=cal0_m3, cal=cal_m3, overid=overid_m3, usd=usd_m3, scale=scale,
+        accounts=farm_income_accounts(cal_m3, data_m3, counties, usd_m3, E),
+        unscaled_ratio=float(np.sum((overid_m3["theta_T = 0.40 (default)"]["model"] / scale * TF)[pub])
+                             / np.sum((obs * TF)[pub])),
+    )  # fmt: skip
 
     return dict(
         state=state, year=year, df=df, cdf=cdf, data=data, usd=usd, counties=counties, shp=shp, fips=fips,
         flows=flows, gravity=gravity, theta=theta, theta_hat=theta_hat, earn_years=earn_years,
-        p0=p0, p_state=p_state, cal0=cal0, cal=cal, overid=overid, pub=pub, scale=scale,
-        unscaled_ratio=unscaled_ratio, ext_counties=ext_counties,
+        p0=p0, p_state=p_state, cal0=cal0, cal=cal, overid=overid, pub=pub, m3=m3, accounts=accounts,
+        corr_log_farmland=corr_log_farmland, ext_counties=ext_counties,
         earn_2022_over_mean=float(cdf["farm_earn_usd"].sum() / earn_mean.sum()),
     )  # fmt: skip
 
@@ -192,6 +238,8 @@ def snapshot(r) -> dict:
         "wU_core": float(w.wU[r["data"].core]),
         "U_bar": float(f.U_bar),
         "lodes_total_flows": float(r["flows"].sum()),
+        "wA_obs_state_usd": float((r["cdf"]["wA_obs_usd"] * r["cdf"]["HA"]).sum() / r["cdf"]["HA"].sum()),
+        "theta_T_county_max": float(r["theta"][CHOSEN_THETA]["county"].max()),
     }
 
 
@@ -220,7 +268,8 @@ def write_estimates(r, path: Path):
             "theta_T": {
                 "value": r["theta_hat"],
                 "source": f"state rent share: NASS {r['year']} non-irrigated cash rent x CDL cropland over "
-                "(BEA CAINC45 farm earnings + rent paid to non-operator landlords) (spec §5 step 5)",
+                "(that rent bill + farm labour bill wA_obs x HA) (spec §5 step 5); labour bill = BEA farm "
+                "compensation per farm wage job, 5-year mean, x BEA farm jobs (urqse.data.build_state)",
                 "verify": True,
             },
         },

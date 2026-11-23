@@ -29,6 +29,8 @@ def test_iowa_calibration_snapshot():
     assert all(err < 1e-7 for err in r["cal"].max_rel_error.values())
     assert r["cal"].baseline.info.converged
     assert all(g.info.converged for g in r["gravity"].values())
+    # spec §12.1 income routing: labour + owner rent + landlord rent = w_A H_A + rho T^F
+    assert abs(r["accounts"]["identity_rel"]) < 1e-12
     got = rs.snapshot(r)
     assert set(got) == set(SNAPSHOT)
     for k, v in SNAPSHOT.items():
