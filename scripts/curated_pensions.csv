@@ -1,0 +1,69 @@
+iso3,contrib_employee,contrib_employer,pension_spend_gdp,ret_age_m,ret_age_f,note
+# Approximate statutory MANDATORY pension contribution rates (% of gross wage), compiled from
+# OECD Pensions at a Glance 2023 (Table 8.2 "Pension contribution rates"), US SSA / ISSA
+# "Social Security Programs Throughout the World" and national sources. Values are rounded
+# approximations meant as editable defaults in the app, NOT authoritative statistics.
+# pension_spend_gdp / ret ages are only filled where OECD does not provide them.
+AUS,0,12,,,,Superannuation Guarantee (employer) 12% from Jul-2025; Age Pension is tax-financed
+AUT,10.25,12.55,,,,
+BEL,7.5,8.86,,,,
+CAN,5.95,5.95,,,,CPP base rate
+CHE,4.35,4.35,,,,AHV/AVS only; occupational BVG adds ~7-18% (age-dependent)
+CHL,10,1,,,,Individual accounts + 2025 reform employer contribution (phasing in)
+COL,4,12,,,,
+CRI,4.17,6.75,,,,IVM rates (phasing up)
+CZE,6.5,21.5,,,,
+DEU,9.3,9.3,,,,
+DNK,4,8,,,,ATP + quasi-mandatory occupational; public pension tax-financed
+ESP,4.82,24.08,,,,Incl. intergenerational equity mechanism (MEI) 2024
+EST,2,20,,,,
+FIN,7.15,17.34,,,,TyEL average
+FRA,11.3,16.5,,,,Basic + complementary (Agirc-Arrco)
+GBR,8,15,,,,National Insurance (not pension-only) ; auto-enrolment adds 5+3
+GRC,6.67,13.33,,,,
+HUN,10,13,,,,Employer part is general social contribution tax
+IRL,4,11.05,,,,PRSI (not pension-only)
+ISL,4,11.5,,,,Occupational
+ISR,6,6.5,,,,Mandatory occupational
+ITA,9.19,23.81,,,,
+JPN,9.15,9.15,,,,Employees' Pension Insurance
+KOR,4.75,4.75,,,,NPS 9.5% in 2026 (rising 0.5pp/yr to 13%)
+LTU,8.72,0,,,,
+LUX,8,8,,,,+8% state
+LVA,10.5,9.5,,,,Pension share of social insurance
+MEX,1.125,10.75,,,,Reform phasing employer rate up to 2030
+NLD,17.9,0,,,,AOW first pillar (employee, capped); occupational ~20% on top
+NOR,7.8,14.1,,,,National insurance (not pension-only)
+NZL,0,0,,,,NZ Super is tax-financed
+POL,9.76,9.76,,,,
+PRT,11,23.75,,,,Single social tax (not pension-only)
+SVK,4,14,,,,
+SVN,15.5,8.85,,,,
+SWE,7,11.5,,,,
+TUR,9,11,,,,
+USA,6.2,6.2,,,,OASDI
+ARG,11,10.2,9.0,65,60,
+BRA,11,20,10.0,65,62,RGPS; employee 7.5-14% progressive
+BGR,8.38,10.92,,,,
+CHN,8,16,5.0,60,55,Urban employees basic pension; retirement age rising from 2025
+HRV,20,0,,,,
+CYP,8.8,8.8,,,,
+IDN,3,5.7,1.0,58,58,JHT + JP
+IND,12,12,1.7,58,58,EPF/EPS formal sector only
+MLT,10,10,,,,
+ROU,25,0,,,,
+RUS,0,22,6.5,64,59,Pension share of unified insurance contribution; ages rising
+SAU,9,9,3.5,,,Saudi nationals
+ZAF,0,0,1.4,60,60,Old age grant is tax-financed
+VNM,8,14,,61,57,
+THA,3,3,,55,55,Social Security Fund old-age part
+PHL,5,10,,60,60,SSS
+MYS,11,13,,60,60,EPF (provident fund)
+SGP,20,17,,63,63,CPF (all accounts) up to age 55
+NGA,8,10,,60,60,Contributory pension scheme
+PAK,1,5,,60,55,EOBI
+UKR,0,22,,60,60,Unified social contribution
+KAZ,10,2.5,,63,61,
+IRN,7,20,,62,55,
+EGY,11,15,,60,60,
+TWN,0,6,,65,65,Labor Pension (+ labor insurance old-age part)
