@@ -49,6 +49,7 @@ const EDIT_FIELDS = [
 const S = {
   sel: [], year: 2025, bin: 5, units: "pct", rightMode: "va", showBase: true,
   retMode: "country", retShift: 0, retUniform: 65,
+  fert: { mode: "un", variant: "low", start: 2025, shift: -0.5, ramp: 10, pts: [{ y: 2040, t: 1.0 }] },
   shocks: [], prod: PROD_PRESETS.flat.map(p => ({ ...p })), ageProfile: true, growth: 1.0, index: "wage",
   edits: load("dp.edits", {}), mapMetric: "s65", allowBig: new Set(),
 };
@@ -130,12 +131,101 @@ function shockFactor(age, year, sex) {
   }
   return f;
 }
+let BASELINE = false;   // true while computing the UN-baseline (no shocks, no fertility scenario) outline
+function withBaseline(fn) { BASELINE = true; try { return fn(); } finally { BASELINE = false; } }
 function shockedPop(id, year) {
   const p = rawPop(id, year); if (!p) return null;
-  if (!S.shocks.length) return p;
+  const k = FC.k.get(id);
+  if (BASELINE || (!S.shocks.length && !k)) return p;
   const m = new Array(AGES), f = new Array(AGES);
-  for (let a = 0; a < AGES; a++) { m[a] = p.m[a] * shockFactor(a, year, "m"); f[a] = p.f[a] * shockFactor(a, year, "f"); }
+  for (let a = 0; a < AGES; a++) {
+    const kk = k ? k[year - a - K0] : 1;
+    m[a] = p.m[a] * kk * shockFactor(a, year, "m");
+    f[a] = p.f[a] * kk * shockFactor(a, year, "f");
+  }
   return { m, f };
+}
+
+// ------------------------------------------------------------------ fertility scenarios
+// Births in year Y = Σ women(a,Y) × ASFR(a,Y). A scenario scales the UN age-specific rates by ratio(Y);
+// the change in births becomes a cohort multiplier k(birth cohort) that follows that cohort for life,
+// so smaller cohorts of women also have fewer children later (echo). Shocks to women feed in the same way.
+const K0 = 1800, F0 = 1950, F1 = 2100;
+const FC = { k: new Map(), sig: "", agg: null };
+const tfrMed = (d, y) => { const r = d.asfr?.[y - d.y0]; return r ? d3.sum(r) / 1000 : 0; };
+function fertActive() { return S.fert.mode !== "un" || S.shocks.length > 0; }
+function fertSig(ids) { return JSON.stringify([S.fert, S.shocks, ids]); }
+
+/** aggregate (selection-wide) base fertility: births-weighted ASFR by age and year */
+function aggregateFert(ids) {
+  const n = F1 - F0 + 1, asfr = Array.from({ length: n }, () => new Float64Array(35)), births = new Float64Array(n);
+  const fem = Array.from({ length: n }, () => new Float64Array(35));
+  for (const id of ids) {
+    const d = popReady(id); if (!d?.asfr) continue;
+    for (let y = F0; y <= F1; y++) {
+      const i = y - d.y0, r = d.asfr[i], f = d.f[i];
+      for (let a = 0; a < 35; a++) { const w = f[a + 15]; asfr[y - F0][a] += w * r[a]; fem[y - F0][a] += w; births[y - F0] += w * r[a] / 1000; }
+    }
+  }
+  const tfr = new Float64Array(n);
+  for (let j = 0; j < n; j++) for (let a = 0; a < 35; a++) { asfr[j][a] = fem[j][a] ? asfr[j][a] / fem[j][a] : 0; tfr[j] += asfr[j][a] / 1000; }
+  return { asfr, tfr, births };
+}
+/** target aggregate TFR path for "path" / "shift" modes (null outside the scenario window) */
+function targetTfr(base, y) {
+  const F = S.fert, b = base[y - F0];
+  if (y <= F.start) return b;
+  if (F.mode === "shift") return Math.max(0.05, b + F.shift * clamp((y - F.start) / Math.max(1, F.ramp), 0, 1));
+  const pts = [[F.start, base[F.start - F0]], ...F.pts.filter(p => p.y > F.start).sort((p, q) => p.y - q.y).map(p => [p.y, p.t])];
+  return Math.max(0.05, interp(pts, y));
+}
+/** per-location ratio(y) of scenario to UN-medium fertility */
+function ratioFor(id, aggBase) {
+  const F = S.fert, d = popReady(id), r = new Float64Array(F1 - F0 + 1).fill(1);
+  if (F.mode === "variant") {
+    const v = d.tfrVar?.[F.variant]; if (!v) return r;
+    for (let y = v.y0; y <= F1; y++) { const m = tfrMed(d, y); if (m > 0 && v.t[y - v.y0] != null) r[y - F0] = v.t[y - v.y0] / m; }
+  } else if (F.mode === "path" || F.mode === "shift") {
+    for (let y = F.start + 1; y <= F1; y++) { const b = aggBase[y - F0]; if (b > 0) r[y - F0] = targetTfr(aggBase, y) / b; }
+  }
+  return r;
+}
+function prepareFertility(pyramidIds, costIds) {
+  const ids = [...new Set([...pyramidIds, ...costIds])].filter(id => popReady(id)?.asfr);
+  const sig = fertSig([pyramidIds, costIds]);
+  if (sig === FC.sig) return;
+  FC.sig = sig; FC.k = new Map();
+  const agg = aggregateFert(pyramidIds);
+  const n = F1 - F0 + 1, birthsAlt = new Float64Array(n), ratioW = new Float64Array(n);
+  const first = Math.min(S.fert.mode === "variant" ? 2024 : S.fert.mode === "un" ? F1 : S.fert.start, ...S.shocks.map(s => s.year));
+  for (const id of ids) {
+    const d = popReady(id), inSel = pyramidIds.includes(id);
+    const ratio = ratioFor(id, agg.tfr);
+    const k = new Float64Array(F1 + 2 - K0).fill(1);
+    for (let y = F0; y <= F1; y++) {
+      const i = y - d.y0, r = d.asfr[i], f = d.f[i];
+      let den = 0, num = 0;
+      for (let a = 15; a < 50; a++) {
+        const w = f[a] * r[a - 15];
+        den += w;
+        if (y >= first) num += w * k[y - a - K0] * (S.shocks.length ? shockFactor(a, y, "f") : 1);
+      }
+      if (y >= first && den > 0) k[y + 1 - K0] = num / den * ratio[y - F0];
+      if (inSel) { birthsAlt[y - F0] += den / 1000 * (y >= first ? k[y + 1 - K0] : 1); ratioW[y - F0] += den / 1000 * ratio[y - F0]; }
+    }
+    if (fertActive()) FC.k.set(id, k);
+  }
+  const tfrAlt = agg.tfr.map((t, j) => agg.births[j] ? t * ratioW[j] / agg.births[j] : t);
+  const cfr = (tfr) => {   // completed cohort fertility by mother's birth year
+    const out = [];
+    for (let b = F0 - 15; b <= F1 - 49; b++) {
+      let s = 0;
+      for (let a = 15; a < 50; a++) { const j = b + a - F0; s += agg.asfr[j][a - 15] / 1000 * (tfr === agg.tfr ? 1 : (agg.tfr[j] ? tfr[j] / agg.tfr[j] : 1)); }
+      out.push({ b, v: s });
+    }
+    return out;
+  };
+  FC.agg = { tfr: agg.tfr, tfrAlt, births: agg.births, birthsAlt, cfr: cfr(agg.tfr), cfrAlt: cfr(tfrAlt) };
 }
 
 // ------------------------------------------------------------------ economic model
@@ -310,6 +400,8 @@ function render() {
   renderChips();
   drawMapSelection();
   const { pyramidIds, cost, noMembers, bigPending } = R0;
+  prepareFertility(pyramidIds, cost.map(c => c.id));
+  drawFertChart();
   const notes = [];
   const countrySel = S.sel.filter(id => D.byId.get(id)?.type === "Country/Area");
   if (S.sel.length > countrySel.length && countrySel.length) {
@@ -330,17 +422,16 @@ function render() {
   for (const c of cost) runCountry(c.iso, c.id, year, agg, tot);
   // un-shocked right pyramid for the outline
   let rightBase = null;
-  if (S.shocks.length && S.showBase && cost.length) {
-    const saved = S.shocks; S.shocks = [];
+  if (fertActive() && S.showBase && cost.length) {
     const aggB = emptyAgeArrays(), totB = emptyTotals();
-    for (const c of cost) runCountry(c.iso, c.id, year, aggB, totB);
-    S.shocks = saved; rightBase = aggB[S.rightMode];
+    withBaseline(() => { for (const c of cost) runCountry(c.iso, c.id, year, aggB, totB); });
+    rightBase = aggB[S.rightMode];
   }
 
   const name = selectionName();
   $("pyrTitle").textContent = `${name} — ${year}`;
   const rets = cost.length ? avgRet(cost) : null;
-  drawPyramid($("pyrL"), left, S.shocks.length && S.showBase ? leftBase : null, { kind: "pop", rets });
+  drawPyramid($("pyrL"), left, fertActive() && S.showBase ? leftBase : null, { kind: "pop", rets });
   const rm = S.rightMode;
   const capR = {
     va: "Value added (GDP) by age / birth year", contrib: "Pension contributions paid (employee + employer)",
@@ -488,7 +579,7 @@ function drawPyramid(svg, data, base, { kind, rets }) {
           <div class="r"><span><i class="sw" style="background:${female}"></i>Female</span><span>${absF(f.v)} · ${(100 * f.v / total).toFixed(2)}%</span></div>`;
         if (MB) {
           const dv = d.v + f.v - MB[i].v - FB[i].v;
-          html += `<div class="r muted"><span>vs. no shock</span><span>${dv >= 0 ? "+" : ""}${absF(dv)}</span></div>`;
+          html += `<div class="r muted"><span>vs. UN baseline</span><span>${dv >= 0 ? "+" : ""}${absF(dv)}</span></div>`;
         }
         if (kind !== "pop") {
           html += `<div class="r muted"><span>Cohort productivity</span><span>×${cohortProd(S.year - Math.round((d.a0 + d.a1) / 2)).toFixed(2)}</span></div>`;
@@ -502,7 +593,7 @@ function drawPyramid(svg, data, base, { kind, rets }) {
 function renderLegend() {
   const male = css("--male"), female = css("--female");
   let h = `<span><i style="background:${male}"></i>Male</span><span><i style="background:${female}"></i>Female</span>`;
-  if (S.shocks.length && S.showBase) h += `<span><i class="dash"></i>Without shocks</span>`;
+  if (fertActive() && S.showBase) h += `<span><i class="dash"></i>UN baseline (no shocks / fertility scenario)</span>`;
   h += `<span><i class="dash" style="border-top-style:dashed"></i>Retirement age</span>`;
   $("pyrLegend").innerHTML = h;
 }
@@ -780,6 +871,105 @@ function initPresets() {
 }
 
 // ------------------------------------------------------------------ UI: shocks & productivity
+// ------------------------------------------------------------------ fertility chart & controls
+function drawFertChart() {
+  const svg = $("fertChart"), s = d3.select(svg); s.selectAll("*").remove();
+  const A = FC.agg;
+  if (!A) return;
+  const W = svg.clientWidth || 300, H = svg.clientHeight || 210;
+  const m = { t: 10, r: 10, b: 24, l: 30 };
+  const scen = S.fert.mode !== "un";
+  const years = d3.range(F0, F1 + 1);
+  const x = d3.scaleLinear().domain([F0, F1]).range([m.l, W - m.r]);
+  const ymax = Math.max(2.3, d3.max(A.tfr), d3.max(A.tfrAlt), d3.max(A.cfr, d => d.v), ...(S.fert.mode === "path" ? S.fert.pts.map(p => p.t) : []));
+  const y = d3.scaleLinear().domain([0, ymax * 1.06]).nice().range([H - m.b, m.t]);
+  const c1 = css("--s1"), c2 = css("--s2");
+  const g = s.append("g").attr("class", "grid");
+  y.ticks(5).forEach(t => {
+    g.append("line").attr("x1", m.l).attr("x2", W - m.r).attr("y1", y(t)).attr("y2", y(t));
+    s.append("text").attr("x", m.l - 5).attr("y", y(t)).attr("dy", "0.35em").attr("text-anchor", "end").text(t);
+  });
+  [1950, 2000, 2050, 2100].forEach(t => s.append("text").attr("x", x(t)).attr("y", H - 6).attr("text-anchor", t === F1 ? "end" : t === F0 ? "start" : "middle").text(t));
+  s.append("line").attr("class", "zero").attr("x1", m.l).attr("x2", W - m.r).attr("y1", y(2.1)).attr("y2", y(2.1)).style("stroke-dasharray", "1 3");
+  s.append("text").attr("class", "bar-label").attr("x", W - m.r).attr("y", y(2.1) - 4).attr("text-anchor", "end").text("replacement 2.1");
+  s.append("line").attr("class", "ret-line").attr("x1", x(S.year)).attr("x2", x(S.year)).attr("y1", m.t).attr("y2", H - m.b);
+  const line = (data, xf, yf) => d3.line().x(xf).y(yf)(data);
+  const draw = (d, color, dashed) => s.append("path").attr("d", d).attr("fill", "none").attr("stroke", color).attr("stroke-width", 2)
+    .attr("stroke-dasharray", dashed ? "4 3" : null).attr("stroke-linejoin", "round");
+  const inX = d => d.b >= F0;
+  draw(line(A.cfr.filter(inX), d => x(d.b), d => y(d.v)), c2, scen);
+  if (scen) draw(line(A.cfrAlt.filter(inX), d => x(d.b), d => y(d.v)), c2, false);
+  draw(line(years, yy => x(yy), yy => y(A.tfr[yy - F0])), c1, scen);
+  if (scen) draw(line(years, yy => x(yy), yy => y(A.tfrAlt[yy - F0])), c1, false);
+
+  $("fertLegend").innerHTML = `<span><i class="line" style="background:${c1}"></i>Period TFR (by year)</span><span><i class="line" style="background:${c2}"></i>Completed cohort fertility (by mother's birth year)</span>`
+    + (scen ? `<span><i class="dash"></i>UN medium</span>` : "");
+  const j = S.year - F0;
+  const cf = A.cfrAlt.find(d => d.b === S.year - 30);
+  $("fertNote").innerHTML = `<b>${S.year}</b>: TFR ${A.tfrAlt[j].toFixed(2)}${scen ? ` (UN ${A.tfr[j].toFixed(2)})` : ""} · births ${fmtNum(A.birthsAlt[j])}/yr${fertActive() ? ` (UN ${fmtNum(A.births[j])})` : ""}`
+    + (cf ? ` · women born ${cf.b}: ${cf.v.toFixed(2)} children` : "");
+
+  // hover
+  const cross = s.append("line").attr("class", "zero").attr("y1", m.t).attr("y2", H - m.b).style("opacity", 0);
+  const hit = s.append("rect").attr("x", m.l).attr("y", m.t).attr("width", W - m.l - m.r).attr("height", H - m.t - m.b).attr("fill", "transparent")
+    .style("cursor", S.fert.mode === "path" ? "crosshair" : null)
+    .on("mousemove", ev => {
+      const yy = clamp(Math.round(x.invert(d3.pointer(ev)[0])), F0, F1), i = yy - F0;
+      cross.attr("x1", x(yy)).attr("x2", x(yy)).style("opacity", 1);
+      const c = A.cfr.find(d => d.b === yy), ca = A.cfrAlt.find(d => d.b === yy);
+      showTip(ev, `<b>${yy}</b><div class="r"><span><i class="sw" style="background:${c1}"></i>Period TFR</span><span>${A.tfrAlt[i].toFixed(2)}${scen ? ` · UN ${A.tfr[i].toFixed(2)}` : ""}</span></div>`
+        + (c ? `<div class="r"><span><i class="sw" style="background:${c2}"></i>Women born ${yy}</span><span>${ca.v.toFixed(2)}${scen ? ` · UN ${c.v.toFixed(2)}` : ""}</span></div>` : "")
+        + `<div class="r muted"><span>Births</span><span>${fmtNum(A.birthsAlt[i])}${fertActive() ? ` · UN ${fmtNum(A.births[i])}` : ""}</span></div>`
+        + (S.fert.mode === "path" ? `<div class="muted">click to add a point · drag points · double-click to delete</div>` : ""));
+    })
+    .on("mouseleave", () => { cross.style("opacity", 0); hideTip(); })
+    .on("click", ev => {
+      if (S.fert.mode !== "path") return;
+      const [px, py] = d3.pointer(ev);
+      const yy = Math.round(x.invert(px));
+      if (yy <= S.fert.start) return;
+      S.fert.pts.push({ y: yy, t: +Math.max(0.1, y.invert(py)).toFixed(2) });
+      renderFertCtl(); update();
+    });
+  // draggable path points
+  if (S.fert.mode === "path") {
+    s.append("circle").attr("cx", x(S.fert.start)).attr("cy", y(A.tfr[S.fert.start - F0])).attr("r", 4)
+      .attr("fill", css("--surface")).attr("stroke", c1).attr("stroke-width", 2);
+    S.fert.pts.forEach((p, i) => {
+      s.append("circle").attr("cx", x(p.y)).attr("cy", y(p.t)).attr("r", 6).attr("fill", c1)
+        .attr("stroke", css("--surface")).attr("stroke-width", 2).style("cursor", "grab")
+        .call(d3.drag().on("drag", ev => {
+          p.y = clamp(Math.round(x.invert(ev.x)), S.fert.start + 1, F1);
+          p.t = +clamp(y.invert(ev.y), 0.1, 6).toFixed(2);
+          d3.select(ev.sourceEvent.target).attr("cx", x(p.y)).attr("cy", y(p.t));
+          showTip(ev.sourceEvent, `<b>${p.y}</b> · TFR ${p.t.toFixed(2)}`);
+          update();
+        }).on("end", () => { hideTip(); renderFertCtl(); }))
+        .on("dblclick", ev => { ev.stopPropagation(); S.fert.pts.splice(i, 1); renderFertCtl(); update(); });
+    });
+  }
+}
+function renderFertCtl() {
+  const F = S.fert;
+  $("fertMode").value = F.mode === "variant" ? `variant:${F.variant}` : F.mode;
+  $("fertPathCtl").hidden = F.mode !== "path";
+  $("fertShiftCtl").hidden = F.mode !== "shift";
+  $("fertStartRow").hidden = !(F.mode === "path" || F.mode === "shift");
+  $("fertStart").value = F.start; $("fertShift").value = F.shift; $("fertRamp").value = F.ramp;
+  F.pts.sort((p, q) => p.y - q.y);
+  $("fertPts").innerHTML = F.pts.map((p, i) => `<div class="prod-row">year <input type="number" data-i="${i}" data-f="y" value="${p.y}" style="width:70px"> TFR <input type="number" step="0.05" min="0" data-i="${i}" data-f="t" value="${p.t}" style="width:64px"><button data-del="${i}" aria-label="remove">×</button></div>`).join("")
+    || `<div class="muted small">No points — click the chart to add one.</div>`;
+  $("fertPts").querySelectorAll("input").forEach(inp => inp.onchange = () => { F.pts[+inp.dataset.i][inp.dataset.f] = +inp.value; renderFertCtl(); update(); });
+  $("fertPts").querySelectorAll("[data-del]").forEach(b => b.onclick = () => { F.pts.splice(+b.dataset.del, 1); renderFertCtl(); update(); });
+}
+const FERT_PRESETS = {
+  hold: () => [{ y: F1, t: +FC.agg.tfr[S.fert.start - F0].toFixed(2) }],
+  repl: () => [{ y: 2050, t: 2.1 }],
+  low: () => [{ y: 2040, t: 0.7 }],
+  one: () => [{ y: S.fert.start + 5, t: 1.0 }],
+  half: () => [{ y: S.fert.start + 10, t: +(FC.agg.tfr[S.fert.start - F0] / 2).toFixed(2) }],
+};
+
 function renderShocks() {
   $("shockList").innerHTML = S.shocks.map((s, i) => `<div class="item"><span>${s.label ? `<b>${s.label}</b> · ` : ""}${s.year}${s.dur > 1 ? `–${s.year + s.dur - 1}` : ""}, age ${s.a0}${s.a1 !== s.a0 ? `–${s.a1}` : ""}, ${{ b: "both", m: "men", f: "women" }[s.sex]}, ${s.pct > 0 ? "+" : ""}${s.pct}%${s.dur > 1 ? "/yr" : ""}</span><button data-i="${i}" aria-label="remove">×</button></div>`).join("")
     || `<div class="muted small">No shocks.</div>`;
@@ -880,6 +1070,16 @@ function bind() {
   document.querySelectorAll("[data-prod]").forEach(b => b.onclick = () => { S.prod = PROD_PRESETS[b.dataset.prod].map(p => ({ ...p })); renderProd(); update(); });
   on("addProd", "click", () => { const last = S.prod[S.prod.length - 1]; S.prod.push({ b: Math.min(2100, (last?.b ?? 2000) + 10), m: last?.m ?? 1 }); renderProd(); });
   on("clearSel", "click", () => { S.sel = []; update(); });
+  on("fertMode", "change", e => {
+    const [mode, variant] = e.target.value.split(":");
+    S.fert.mode = mode; if (variant) S.fert.variant = variant;
+    renderFertCtl(); update();
+  });
+  on("fertStart", "change", e => { S.fert.start = clamp(+e.target.value || BASE, F0, F1 - 1); renderFertCtl(); update(); });
+  on("fertShift", "change", e => { S.fert.shift = +e.target.value || 0; update(); });
+  on("fertRamp", "change", e => { S.fert.ramp = Math.max(0, +e.target.value || 0); update(); });
+  on("fertAdd", "click", () => { const l = S.fert.pts[S.fert.pts.length - 1]; S.fert.pts.push({ y: Math.min(F1, (l?.y ?? S.fert.start) + 10), t: l?.t ?? 1.5 }); renderFertCtl(); update(); });
+  document.querySelectorAll("[data-fert]").forEach(b => b.onclick = () => { if (!FC.agg) return; S.fert.pts = FERT_PRESETS[b.dataset.fert](); renderFertCtl(); update(); });
   on("saveGroup", "click", () => {
     if (!S.sel.length) return;
     const name = prompt("Name for this group:", selectionName()); if (!name) return;
@@ -913,7 +1113,7 @@ async function main() {
   S.sel = [D.byIso.get("KOR").id];
   readHash();
   $("year").value = S.year; $("yearOut").textContent = S.year;
-  bind(); initSearch(); initPresets(); renderShocks(); renderProd();
+  bind(); initSearch(); initPresets(); renderShocks(); renderProd(); renderFertCtl();
   update();
   await initMap();
   // touch-friendly merge: plain click/tap toggles group membership when enabled

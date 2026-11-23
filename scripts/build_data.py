@@ -127,6 +127,40 @@ def build_population():
     return meta
 
 
+# ---------------------------------------------------------------- fertility
+FERT_FILE = "WPP2024_Fertility_by_Age1.csv.gz"
+FERT_VARIANTS = {"Medium": "med", "Low": "low", "High": "high", "Constant fertility": "const",
+                 "Instant replacement": "repl"}
+
+
+def build_fertility(locs):
+    """Adds age-specific fertility (per 1000 women, ages 15-49, Medium variant 1950-2100) and the
+    TFR of other UN variants (2024-2100) to each docs/data/pop/<loc>.json."""
+    print("WPP fertility")
+    path = fetch(WPP_BASE + FERT_FILE, os.path.join(RAW, FERT_FILE))
+    asfr = defaultdict(dict)                                   # loc -> year -> [35]
+    tfr = defaultdict(lambda: defaultdict(dict))               # loc -> variant -> year -> tfr
+    with gzip.open(path, "rt", encoding="utf-8-sig") as f:
+        for r in csv.DictReader(f):
+            var = FERT_VARIANTS.get(r["Variant"])
+            if not var or not r["LocID"] or int(r["LocID"]) not in locs:
+                continue
+            loc, y, age, v = int(r["LocID"]), int(r["Time"]), int(r["AgeGrpStart"]), float(r["ASFR"] or 0)
+            if var == "med":
+                asfr[loc].setdefault(y, [0.0] * 35)[age - 15] = round(v, 2)
+            else:
+                tfr[loc][var][y] = tfr[loc][var].get(y, 0) + v / 1000
+    for loc in locs:
+        fn = os.path.join(OUT, "pop", f"{loc}.json")
+        d = json.load(open(fn))
+        if loc in asfr:
+            ys = range(d["y0"], d["y0"] + len(d["m"]))
+            d["asfr"] = [asfr[loc].get(y, [0.0] * 35) for y in ys]
+            d["tfrVar"] = {k: {"y0": min(v), "t": [round(v[y], 3) for y in sorted(v)]} for k, v in tfr[loc].items()}
+        with open(fn, "w") as f:
+            json.dump(d, f, separators=(",", ":"))
+
+
 # ---------------------------------------------------------------- world bank
 def latest_by_country(rows):
     """rows: iterable of (iso3, year, value) -> {iso3: (value, year)} with year <= LATEST."""
@@ -245,6 +279,7 @@ def main():
     os.makedirs(RAW, exist_ok=True)
     os.makedirs(OUT, exist_ok=True)
     meta = build_population()
+    build_fertility(set(meta))
     wb = build_worldbank()
     ilo = build_ilo()
     oecd = build_oecd()

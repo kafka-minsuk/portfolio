@@ -28,6 +28,7 @@ gh auth setup-git >/dev/null
 [[ -d .git ]] || git init -q -b main
 git config user.email "$EMAIL"
 git config user.name "$NAME"
+git config http.postBuffer 524288000   # large data folder: avoid HTTP 408 on push
 git add -A
 git commit -q -m "${COMMIT_MSG:-Update demography pyramid app}" || echo "nothing new to commit"
 git branch -M main

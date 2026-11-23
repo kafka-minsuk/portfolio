@@ -89,7 +89,39 @@
           <option value="prod">Population × productivity</option>
         </select>
       </label>
-      <label class="check"><input id="showBase" type="checkbox" checked> Show un-shocked outline</label>
+      <label class="check"><input id="showBase" type="checkbox" checked> Show UN-baseline outline</label>
+
+      <h2>Fertility <span class="muted small">(selection aggregate)</span></h2>
+      <label>Scenario
+        <select id="fertMode">
+          <option value="un">UN medium projection (baseline)</option>
+          <option value="variant:low">UN low variant (≈ −0.5 child)</option>
+          <option value="variant:high">UN high variant (≈ +0.5 child)</option>
+          <option value="variant:const">UN constant fertility</option>
+          <option value="variant:repl">UN instant replacement (≈ 2.1)</option>
+          <option value="path">Custom TFR path (drag on chart)</option>
+          <option value="shift">Shift vs UN (± children per woman)</option>
+        </select>
+      </label>
+      <div id="fertStartRow" class="row gap"><label>Scenario starts after <input id="fertStart" type="number" min="1950" max="2099" value="2025"></label></div>
+      <div id="fertShiftCtl" hidden class="row gap wrap">
+        <label>Shift <input id="fertShift" type="number" step="0.1" value="-0.5"></label>
+        <label>Phase-in (yrs) <input id="fertRamp" type="number" min="0" value="10"></label>
+      </div>
+      <div id="fertPathCtl" hidden>
+        <div id="fertPts"></div>
+        <div class="row gap wrap">
+          <button id="fertAdd" class="ghost small">+ point</button>
+          <button class="ghost small" data-fert="hold">Hold today's level</button>
+          <button class="ghost small" data-fert="repl">2.1 by 2050</button>
+          <button class="ghost small" data-fert="low">0.7 by 2040</button>
+          <button class="ghost small" data-fert="one">1.0 in 5 y</button>
+          <button class="ghost small" data-fert="half">Halve in 10 y</button>
+        </div>
+      </div>
+      <div class="legend small" id="fertLegend" style="margin-top:8px"></div>
+      <svg id="fertChart" role="img" aria-label="Fertility reference chart"></svg>
+      <div id="fertNote" class="note small"></div>
 
       <h2>Retirement age</h2>
       <div class="row gap wrap">
@@ -185,7 +217,8 @@
         <h2>Sources &amp; method</h2>
         <div class="prose">
           <p><b>Population</b>: UN World Population Prospects 2024, population on 1 January by single age (0–100+) and sex; estimates 1950–2023, medium-variant projection 2024–2100. Birth year = year − age.</p>
-          <p><b>Shocks</b>: each shock multiplies the people who are aged <i>from–to</i> in each year of its duration by (1 + change). The loss or gain stays with those birth cohorts in every later year (cohort survival is otherwise taken from WPP; echo effects on births are not modelled — add a birth shock for that).</p>
+          <p><b>Fertility</b>: births each year = women aged 15–49 × UN age-specific fertility rates. A scenario scales those rates by the ratio of the chosen TFR to the UN medium TFR of the selection, keeping each country's age pattern and the gaps between countries; UN variants use each country's own variant path. The change in births follows each birth cohort for life, and fewer (or more) daughters means fewer (or more) births a generation later. Completed cohort fertility is the sum of the age-specific rates a woman born in a given year meets at ages 15–49 (shown for cohorts born 1935–2051).</p>
+          <p><b>Shocks</b>: each shock multiplies the people who are aged <i>from–to</i> in each year of its duration by (1 + change). The loss or gain stays with those birth cohorts in every later year, and losses among women of child-bearing age reduce later births. Survival and migration rates are otherwise those of the UN projection.</p>
           <p><b>Value added by birth year</b>: base-year (2025) GDP (World Bank) is spread over workers in proportion to employment rate by age and sex (ILOSTAT, 10-year bands), × age-earnings profile. Your cohort productivity multipliers and the growth rate then change GDP relative to that calibration.</p>
           <p><b>Pensions</b>: public pension spending % GDP (OECD Pensions at a Glance; SOCX; curated values; or an estimate from ILO SDG 1.3.1 coverage × share 65+) is divided by covered people above the current statutory retirement age (OECD) to give the average pension per beneficiary. Beneficiaries = population ≥ retirement age × coverage. <b>Contributions</b> (“self-paid”) = covered workers below the retirement age × wage (labour income share × GDP / workers, ILO) × contributory base (default 70% of labour income, for ceilings / self-employment) × mandatory contribution rate (employee + employer; approximate, curated from OECD/SSA). <b>State subsidy</b> = pension spending − contributions.</p>
           <p><b>Health</b>: current health expenditure per capita (World Bank / WHO GHED) is spread by age with a standard relative cost curve (older people cost several times more), then split into government, out-of-pocket and other private using the country's shares.</p>
