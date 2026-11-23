@@ -3,7 +3,7 @@ county cash rents, and theta_T estimated county by county from rent shares."""
 
 import numpy as np
 
-HA_PER_ACRE = 0.40468564224  # exact (international acre)
+from ..model.land import HA_PER_ACRE
 
 
 def rent_usd_per_acre(rho, usd_per_wage_unit):

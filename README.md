@@ -37,6 +37,21 @@ python3 scripts/build_data.py
 python3 -m http.server -d docs 8000   # then open http://localhost:8000
 ```
 
+## Urban–rural migration simulator (`docs/migration.html`)
+
+The URQSE model (`src/urqse`, spec in `URQSE_model_spec.md`) runs in the browser under Pyodide.
+Two regions: a synthetic 25-county state and Iowa 2022 (99 counties, Polk as the core).
+After changing the model or the Iowa data, rebuild the two web inputs:
+
+```bash
+python -m urqse.calibrate.run_state IA 2022   # Iowa estimates (needs data/IA/2022 from urqse.data.build_state)
+python -m urqse.data.export_web IA 2022       # docs/migration/data/IA_2022.json (county data, params, map)
+python scripts/build_py_bundle.py             # docs/py/urqse.zip
+```
+
+The region file's shape is documented in `src/urqse/api.py`. The exporter needs the `data` extras
+(pandas, geopandas); the browser bundle needs only NumPy.
+
 ## Publish to GitHub Pages (one command)
 
 ```bash

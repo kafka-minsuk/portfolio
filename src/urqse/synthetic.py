@@ -23,7 +23,7 @@ class CountyData:
     """Observed county inputs to the inversion (spec §5 'Data per county')."""
 
     names: list
-    kind: np.ndarray  # "core" | "suburb" | "rural"
+    kind: np.ndarray  # "core" | "suburb" | "rural" (| "external" for a real state's outside zone)
     x: np.ndarray  # km
     y: np.ndarray  # km
     N: np.ndarray  # resident workers

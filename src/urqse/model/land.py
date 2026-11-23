@@ -4,6 +4,8 @@ import numpy as np
 
 from .params import Params
 
+HA_PER_ACRE = 0.40468564224  # exact (international acre)
+
 
 def operator_land_income_per_worker(wA, omega, p: Params):
     """omega * rho * TF / HA, written with the farm-rent identity rho TF = (theta_T/theta_H) wA HA."""

@@ -7,6 +7,7 @@ const FIXTURE = new URLSearchParams(location.search).has("fixture");
 const TOL = 1e-8;
 
 const DEFAULT_SCENARIO = {
+  region: "synthetic",
   params: { alpha: 0.75, beta: 0.8, lam: 6.8, kappa_lam: 0.08, mu: 0.5, theta_T: 0.40, lam_R: 3.0, nu: 2.0, eta: 0.0,
             price_rent_ratio: 36.0, epsilon: 0.10, varsigma: 0.5, land_income_in_choice: false },
   shocks: { core_productivity_pct: 10.0, farm_tfp_pct: 0.0, travel_cut_pct: 0.0, travel_cut_scope: "into_core",
@@ -15,7 +16,11 @@ const DEFAULT_SCENARIO = {
 
 // ------------------------------------------------------------------ formatting
 const MINUS = "−";
-const signed = (v, d = 1) => v == null || !isFinite(v) ? "—" : (v > 0 ? "+" : v < 0 ? MINUS : "") + Math.abs(v).toFixed(d);
+const signed = (v, d = 1) => {
+  if (v == null || !isFinite(v)) return "—";
+  const r = Number(v.toFixed(d));  // no sign on a value that rounds to zero
+  return (r > 0 ? "+" : r < 0 ? MINUS : "") + Math.abs(v).toFixed(d);
+};
 const pct = (v, d = 1) => v == null || !isFinite(v) ? "—" : signed(v, d) + "%";
 const int = d3.format(",.0f");
 const sci = v => v == null || !isFinite(v) ? "—" : v === 0 ? "0" : v.toExponential(1).replace("-", MINUS);
@@ -42,7 +47,45 @@ const PARAM_CTL = [
   { key: "land_income_in_choice", label: "Land income affects where people live", check: true, help: "Off by default: land income is portable wealth." },
 ];
 
-const S = { scenario: structuredClone(DEFAULT_SCENARIO), result: null, view: "long", metric: "dN_pct", period: 0, autoRun: false };
+const S = { scenario: structuredClone(DEFAULT_SCENARIO), result: null, view: "long", metric: "dN_pct", period: 0, autoRun: false, geo: {}, shapes: {} };
+
+// ------------------------------------------------------------------ regions
+const REGION_TEXT = {
+  synthetic: { sub: "synthetic 25-county state", help: "A made-up state with known answers: one core city, 8 suburbs, 16 rural counties." },
+  IA_2022: { sub: "Iowa 2022, 99 counties", help: "Real county data. The core is Polk County (Des Moines); suburbs are the other metro-area counties." },
+};
+const isReal = r => !!r.region;  // a real region's result carries region, levels and real units
+
+// The map polygons come from the same region document the worker reads (shape in urqse.api).
+function loadGeo(region) {
+  if (region === "synthetic") return Promise.resolve(null);
+  return S.geo[region] ??= fetch(`migration/data/${region}.json`).then(res => {
+    if (!res.ok) throw new Error(`Region data migration/data/${region}.json not found (HTTP ${res.status}).`);
+    return res.json();
+  }).then(doc => (S.shapes[region] = doc.geometry)).catch(err => { delete S.geo[region]; throw err; });
+}
+
+function syncRegion() {
+  const t = REGION_TEXT[S.scenario.region];
+  $("region").value = S.scenario.region;
+  $("regionSub").textContent = t.sub;
+  $("regionHelp").textContent = t.help;
+}
+
+async function setRegion(region) {
+  $("region").disabled = true;
+  try {
+    const [d] = await Promise.all([backend.defaults(region), loadGeo(region)]);
+    S.scenario = { region, params: { ...DEFAULT_SCENARIO.params, ...d.params }, shocks: { ...DEFAULT_SCENARIO.shocks, ...d.shocks } };
+    S.period = 0;
+    syncControls();
+    requestRun();
+  } catch (err) {
+    showError(err.message);
+  } finally {
+    $("region").disabled = FIXTURE;
+  }
+}
 
 function controlHTML(c, group) {
   const id = `${group}-${c.key}`;
@@ -69,6 +112,7 @@ function buildControls() {
 }
 
 function syncControls() {
+  syncRegion();
   for (const [group, list] of [["shocks", SHOCK_CTL], ["params", PARAM_CTL]]) for (const c of list) {
     const el = $(`${group}-${c.key}`), v = S.scenario[group][c.key];
     if (c.check) el.checked = !!v; else el.value = v;
@@ -101,12 +145,12 @@ function workerBackend(onStage) {
     onStage({ stage: "error", text: msg });
     failAll(msg);
   };
-  const call = (type, scenario) => new Promise((resolve, reject) => {
+  const call = (type, payload) => new Promise((resolve, reject) => {
     const id = ++seq;
     waits.set(id, { resolve, reject });
-    worker.postMessage({ id, type, scenario });
+    worker.postMessage({ id, type, ...payload });
   });
-  return { run: sc => call("run", sc), defaults: () => call("default") };
+  return { run: scenario => call("run", { scenario }), defaults: region => call("default", { region }) };
 }
 
 function fixtureBackend() {
@@ -196,10 +240,23 @@ const TILES = [
   ["Farm households that leave", r => r.wealth.leaver_pct, "wealth change"],
 ];
 
+// Real regions: the same tiles, with levels in real units under the percent (baseline → long run).
+const usd = d3.format("$,.0f");
+const arrow = (pair, f, unit = "") => `${f(pair[0])} → ${f(pair[1])}${unit}`;
+const REAL_SUB = {
+  "Rural residents": r => arrow(r.levels.rural_residents, int, " workers"),
+  "Farmland per farm worker": r => arrow(r.levels.land_per_farm_worker_acres, int, " acres"),
+  "Farm wage": r => arrow(r.levels.farm_wage_usd, usd, " a year"),
+  "Farmland rent": r => arrow(r.levels.farmland_rent_usd_acre, usd, " per acre"),
+  "Core floor rent": r => r.region.core_label,
+  "Region population": r => `${int(r.levels.region_residents[0])} workers, external zone included`,
+};
+
 function drawTiles(r) {
   $("tiles").innerHTML = TILES.map(([k, get, sub]) => {
     const v = get(r);
-    return `<div class="tile"><div class="k">${k}</div><div class="v${Math.abs(v) < 0.05 ? " neutral" : ""}">${pct(v)}</div><div class="s">${sub}</div></div>`;
+    const s = isReal(r) && REAL_SUB[k] ? REAL_SUB[k](r) : sub;
+    return `<div class="tile"><div class="k">${k}</div><div class="v${Math.abs(v) < 0.05 ? " neutral" : ""}">${pct(v)}</div><div class="s">${esc(s)}</div></div>`;
   }).join("");
   const sh = S.scenario.shocks;
   const parts = [];
@@ -214,7 +271,7 @@ function drawTiles(r) {
 const METRICS = [
   ["dN_pct", "Residents"], ["HA_pct", "Farm jobs"], ["wA_pct", "Farm wage"], ["rho_pct", "Farmland rent"], ["r_pct", "Floor rent"],
 ];
-const KIND_LABEL = { core: "Core city", suburb: "Suburb", rural: "Rural" };
+const KIND_LABEL = { core: "Core city", suburb: "Suburb", rural: "Rural", external: "External zone" };
 const tip = $("tooltip");
 function showTip(html, ev) {
   tip.innerHTML = html;
@@ -234,18 +291,23 @@ function divergingScale(maxAbs) {
   return d3.scaleDiverging(interp).domain([-m, 0, m]).clamp(true);
 }
 
+// The colour scale spans the counties on the map (not the external zone).
+const onMap = r => d3.range(r.counties.length).filter(i => r.counties[i].kind !== "external");
+
 function mapValues(r) {
-  const n0 = r.path.N[0];
+  const n0 = r.path.N[0], drawn = onMap(r);
   if (S.view === "path") {
     const row = r.path.N[S.period];
     return { values: row.map((v, i) => (v / n0[i] - 1) * 100), sizes: row,
-             maxAbs: d3.max(r.path.N, row => d3.max(row, (v, i) => Math.abs(v / n0[i] - 1) * 100)), label: `Residents, period ${r.path.t[S.period]} vs start` };
+             maxAbs: d3.max(r.path.N, row => d3.max(drawn, i => Math.abs(row[i] / n0[i] - 1) * 100)), label: `Residents, period ${r.path.t[S.period]} vs start` };
   }
   const vals = r.long_run[S.metric];
-  return { values: vals, sizes: r.long_run.N, maxAbs: d3.max(vals, Math.abs), label: `${METRICS.find(m => m[0] === S.metric)[1]}, long run vs start` };
+  return { values: vals, sizes: r.long_run.N, maxAbs: d3.max(drawn, i => Math.abs(vals[i])), label: `${METRICS.find(m => m[0] === S.metric)[1]}, long run vs start` };
 }
 
 function drawMap(r) {
+  const geo = isReal(r) ? S.shapes[r.region.id] : null;
+  if (geo) return drawPolygonMap(r, geo);
   const svg = d3.select("#map"), node = svg.node();
   const W = node.clientWidth, H = node.clientHeight;
   svg.attr("viewBox", `0 0 ${W} ${H}`).selectAll("*").remove();
@@ -289,7 +351,57 @@ function drawMap(r) {
   drawMapLegend(color, mv);
 }
 
-function drawMapLegend(color, mv) {
+// Real regions: county polygons in the x_km / y_km frame, filled by the same diverging scale.
+function drawPolygonMap(r, geo) {
+  const svg = d3.select("#map"), node = svg.node();
+  const W = node.clientWidth, H = node.clientHeight, pad = 12;
+  svg.attr("viewBox", `0 0 ${W} ${H}`).selectAll("*").remove();
+  const C = r.counties, mv = mapValues(r), color = divergingScale(mv.maxAbs), drawn = onMap(r);
+  const xs = [Infinity, -Infinity], ys = [Infinity, -Infinity];
+  for (const i of drawn) for (const poly of geo[i]) for (const ring of poly) for (let j = 0; j < ring.length; j += 2) {
+    xs[0] = Math.min(xs[0], ring[j]); xs[1] = Math.max(xs[1], ring[j]);
+    ys[0] = Math.min(ys[0], ring[j + 1]); ys[1] = Math.max(ys[1], ring[j + 1]);
+  }
+  const k = Math.min((W - 2 * pad) / (xs[1] - xs[0]), (H - 2 * pad - 20) / (ys[1] - ys[0]));
+  const cx = W / 2 - k * (xs[0] + xs[1]) / 2, cy = (H - 20) / 2 + k * (ys[0] + ys[1]) / 2;
+  const px = x => cx + k * x, py = y => cy - k * y;
+  const pathOf = i => geo[i].map(poly => poly.map(ring => {
+    let d = "";
+    for (let j = 0; j < ring.length; j += 2) d += (j ? "L" : "M") + px(ring[j]).toFixed(1) + "," + py(ring[j + 1]).toFixed(1);
+    return d + "Z";
+  }).join("")).join("");
+  const STROKE = { core: ["var(--core-ring)", 2.5], suburb: ["var(--core-ring)", 0.9], rural: ["var(--surface-2)", 0.6] };
+  const LAYER = { rural: 0, suburb: 1, core: 2 };  // heavier outlines on top
+  const order = [...drawn].sort((a, b) => LAYER[C[a].kind] - LAYER[C[b].kind]);
+  svg.append("g").selectAll("path").data(order).join("path")
+    .attr("class", i => `county poly ${C[i].kind}`).attr("d", pathOf)
+    .attr("fill", i => color(mv.values[i]))
+    .attr("stroke", i => STROKE[C[i].kind][0]).attr("stroke-width", i => STROKE[C[i].kind][1]).attr("stroke-linejoin", "round")
+    .on("mouseenter", ev => d3.select(ev.currentTarget).raise())
+    .on("mousemove", (ev, i) => showTip(countyTip(r, i), ev))
+    .on("mouseleave", hideTip);
+  const core = r.counties.findIndex(c => c.kind === "core");
+  svg.append("text").attr("class", "label").attr("x", px(C[core].x)).attr("y", py(C[core].y) + 4)
+    .attr("text-anchor", "middle").text(r.region.core_label);
+  const km = [25, 50, 100, 200].find(v => v * k > 60) || 200;
+  const sb = svg.append("g").attr("transform", `translate(14,${H - 12})`);
+  sb.append("line").attr("x2", km * k).attr("stroke", css("--text-2")).attr("stroke-width", 1.5);
+  sb.append("text").attr("y", -5).text(`${km} km`);
+  drawMapLegend(color, mv, true);
+}
+
+function drawMapLegend(color, mv, polygons = false) {
+  if (polygons) {
+    const sw = (stroke, w) => `<svg width="18" height="14"><rect x="1.5" y="1.5" width="15" height="11" fill="var(--div-mid)" stroke="${stroke}" stroke-width="${w}"/></svg>`;
+    const m = color.domain()[2];
+    const stops = d3.range(0, 1.0001, 0.1).map(t => color(-m + 2 * m * t)).join(",");
+    $("mapLegend").innerHTML =
+      `<span class="ramp"><b>${esc(mv.label)}</b></span>
+       <span class="ramp">${pct(-m, m < 10 ? 1 : 0)} <i style="background:linear-gradient(90deg,${stops})"></i> ${pct(m, m < 10 ? 1 : 0)}</span>
+       <span class="kinds"><span>${sw("var(--core-ring)", 2.5)} Core city</span><span>${sw("var(--core-ring)", 0.9)} Suburb (metro county)</span><span>${sw("var(--border)", 0.6)} Rural</span></span>
+       <span>The external zone (out-of-state commuters) is not drawn. It counts in region totals, not in rural totals.</span>`;
+    return;
+  }
   const m = color.domain()[2];
   const stops = d3.range(0, 1.0001, 0.1).map(t => color(-m + 2 * m * t)).join(",");
   const ring = (kind) => {
@@ -314,19 +426,30 @@ function countyTip(r, i) {
   html += row("Residents, start → long run", `${int(c.N0)} → ${int(L.N[i])}`)
     + row("Residents", pct(L.dN_pct[i])) + row("Farm jobs", pct(L.HA_pct[i])) + row("Farm wage", pct(L.wA_pct[i]))
     + row("Farmland rent", pct(L.rho_pct[i])) + row("Floor rent", pct(L.r_pct[i]))
-    + row("Farmland", int(c.TF)) + row("Owner-operated share", Math.round(c.omega * 100) + "%");
+    + (isReal(r) ? realTipRows(r, i, row) : row("Farmland", int(c.TF)))
+    + row("Owner-operated share", Math.round(c.omega * 100) + "%");
   return html;
+}
+
+function realTipRows(r, i, row) {
+  const R = r.real;
+  return row("Farmland rent, $ per acre", `${usd(R.rent0_usd_acre[i])} → ${usd(R.rent_usd_acre[i])}`)
+    + row("Farm wage, $ a year", `${usd(R.wA0_usd[i])} → ${usd(R.wA_usd[i])}`)
+    + row("Farmland", `${int(R.TF_acres[i])} acres (${int(r.counties[i].TF)} ha)`);
 }
 
 function drawTable(r) {
   const L = r.long_run;
   const head = ["County", "Type", "Residents", "Long run", "Residents Δ", "Farm jobs Δ", "Farm wage Δ", "Farmland rent Δ", "Floor rent Δ", "Owner share"];
+  const real = isReal(r);
+  if (real) head.splice(8, 0, "Farmland rent, $/acre");
+  const rent = i => real ? `<td>${usd(r.real.rent0_usd_acre[i])} → ${usd(r.real.rent_usd_acre[i])}</td>` : "";
   $("countyTable").innerHTML = `<thead><tr>${head.map(h => `<th>${h}</th>`).join("")}</tr></thead><tbody>${r.counties.map((c, i) =>
-    `<tr><td>${esc(c.name)}</td><td>${KIND_LABEL[c.kind] || c.kind}</td><td>${int(c.N0)}</td><td>${int(L.N[i])}</td><td>${pct(L.dN_pct[i])}</td><td>${pct(L.HA_pct[i])}</td><td>${pct(L.wA_pct[i])}</td><td>${pct(L.rho_pct[i])}</td><td>${pct(L.r_pct[i])}</td><td>${Math.round(c.omega * 100)}%</td></tr>`).join("")}</tbody>`;
+    `<tr><td>${esc(c.name)}</td><td>${KIND_LABEL[c.kind] || c.kind}</td><td>${int(c.N0)}</td><td>${int(L.N[i])}</td><td>${pct(L.dN_pct[i])}</td><td>${pct(L.HA_pct[i])}</td><td>${pct(L.wA_pct[i])}</td><td>${pct(L.rho_pct[i])}</td>${rent(i)}<td>${pct(L.r_pct[i])}</td><td>${Math.round(c.omega * 100)}%</td></tr>`).join("")}</tbody>`;
 }
 
 // ------------------------------------------------------------------ line charts (single y axis each)
-function lineChart(sel, { t, series, refs = [], vlines = [], yFmt, tipFmt = yFmt }) {
+function lineChart(sel, { t, series, refs = [], vlines = [], yFmt: fmt, tipFmt = fmt }) {
   const svg = d3.select(sel), node = svg.node();
   const W = node.clientWidth, H = node.clientHeight;
   const direct = series.length > 1;
@@ -337,6 +460,9 @@ function lineChart(sel, { t, series, refs = [], vlines = [], yFmt, tipFmt = yFmt
   let [lo, hi] = d3.extent(all);
   const span = hi - lo || Math.abs(hi) * 0.02 || 0.01;
   const y = d3.scaleLinear().domain([lo - span * 0.08, hi + span * 0.08]).nice().range([H - M.b, M.t]);
+  // small moves (real regions) need more decimals than the default format to tell ticks apart
+  const ticks = y.ticks(5);
+  const yFmt = new Set(ticks.map(fmt)).size === ticks.length ? fmt : d3.format(`.${d3.precisionFixed(ticks[1] - ticks[0])}f`);
 
   svg.append("g").attr("class", "grid").attr("transform", `translate(${M.l},0)`)
     .call(d3.axisLeft(y).ticks(5).tickSize(-(W - M.l - M.r)).tickFormat("")).call(g => g.select(".domain").remove());
@@ -422,6 +548,8 @@ function drawDiagnostics(r, dx) {
       ${row("Gap", isFinite(gap) ? gap.toFixed(2) + "%" : "—", isFinite(gap) ? gap < 0.2 : null)}</div>`;
   }
   $("diag").innerHTML = html;
+  $("iowaCaveats").hidden = !(isReal(r) && r.region.id === "IA_2022");
+  if (isReal(r)) $("usdUnit").textContent = usd(r.region.usd_per_wage_unit);
 }
 
 // ------------------------------------------------------------------ view state
@@ -470,11 +598,8 @@ function wireView() {
   $("scrub").addEventListener("input", e => setPeriod(Number(e.target.value)));
   $("playBtn").addEventListener("click", togglePlay);
   $("runBtn").addEventListener("click", requestRun);
-  $("resetBtn").addEventListener("click", async () => {
-    S.scenario = await backend.defaults();
-    syncControls();
-    requestRun();
-  });
+  $("resetBtn").addEventListener("click", () => setRegion(S.scenario.region));
+  $("region").addEventListener("change", e => setRegion(e.target.value));
   $("themeBtn").addEventListener("click", () => {
     const root = document.documentElement;
     const cur = root.dataset.theme || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
@@ -488,6 +613,7 @@ function wireView() {
 }
 
 async function main() {
+  $("region").disabled = FIXTURE;
   buildControls();
   syncControls();
   wireView();
@@ -498,8 +624,8 @@ async function main() {
     setStatus("Starting the model…");
     backend = workerBackend(onStage);
     try {
-      const d = await backend.defaults();
-      S.scenario = { params: { ...DEFAULT_SCENARIO.params, ...d.params }, shocks: { ...DEFAULT_SCENARIO.shocks, ...d.shocks } };
+      const d = await backend.defaults("synthetic");
+      S.scenario = { region: "synthetic", params: { ...DEFAULT_SCENARIO.params, ...d.params }, shocks: { ...DEFAULT_SCENARIO.shocks, ...d.shocks } };
       syncControls();
     } catch (err) {
       return showError(err.message);

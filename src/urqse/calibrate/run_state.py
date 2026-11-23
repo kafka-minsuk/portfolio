@@ -34,10 +34,14 @@ EARN_YEARS = 5  # multi-year mean of BEA farm earnings for the M3 theta_T compar
 # --- tracked state estimates ---------------------------------------------------------------
 
 
+def state_estimates(state: str, year: int) -> dict:
+    return json.loads((ESTIMATES_DIR / f"{state.upper()}_{year}.json").read_text())
+
+
 def state_params(state: str, year: int, **overrides) -> Params:
     """Params() with the state's estimated values (estimates/{state}_{year}.json) on top. The
     global defaults, and so the web app's synthetic scenario, are untouched."""
-    est = json.loads((ESTIMATES_DIR / f"{state.upper()}_{year}.json").read_text())
+    est = state_estimates(state, year)
     return Params(**{k: v["value"] for k, v in est["params"].items()}, **overrides)
 
 

@@ -1,0 +1,86 @@
+"""Export a built, calibrated state for the web simulator (offline; needs pandas and geopandas).
+
+    python -m urqse.data.export_web IA 2022
+
+Writes docs/migration/data/{state}_{year}.json, the region document the browser model reads. Its
+shape is documented once, in urqse.api (REGION DOCUMENT). The travel matrix is rounded to 0.01
+minutes and distances to 0.01 km; county geometry is simplified as a coverage (shared borders stay
+shared) and rounded to 0.1 km."""
+
+import argparse
+import json
+from pathlib import Path
+
+import numpy as np
+import shapely
+
+from ..api import REGION_FORMAT
+from ..calibrate.run_state import state_estimates
+from .build_state import STATE_FIPS, read_counties
+from .loaders import COUNTY_FILE, TRAVEL_FILE, read_county, read_travel, state_dir, to_county_data, usd_per_wage_unit
+
+ROOT = Path(__file__).resolve().parents[3]
+OUT_DIR = ROOT / "docs" / "migration" / "data"
+MAP_CRS = 26915  # UTM 15N, the frame of x_km / y_km (build_state)
+SIMPLIFY_M = 400.0
+STATE_NAME = {"IA": "Iowa"}
+CORE_LABEL = {"IA": "Polk (Des Moines)"}
+
+
+def county_polygons(shp, fips) -> list:
+    """Per county: a list of polygons, each a list of rings, each ring a flat [x0, y0, x1, y1, ...]
+    in km. None for the external zone (not a polygon)."""
+    counties = [f for f in fips if f in shp.index]
+    geoms = shapely.coverage_simplify(shp.loc[counties].to_crs(MAP_CRS).geometry.values, SIMPLIFY_M)
+    by_fips = dict(zip(counties, geoms))
+
+    def rings(poly):
+        return [np.round(np.asarray(r.coords)[:-1] / 1e3, 1).ravel().tolist() for r in (poly.exterior, *poly.interiors)]
+
+    def polys(g):
+        return [rings(p) for p in getattr(g, "geoms", [g])]
+
+    return [polys(by_fips[f]) if f in by_fips else None for f in fips]
+
+
+def region_document(state: str, year: int) -> dict:
+    d = state_dir(state, year)
+    df = read_county(d / COUNTY_FILE)
+    fips, t, dist = read_travel(d / TRAVEL_FILE)
+    data = to_county_data(df, fips, t, dist)
+    shp = read_counties(ROOT / "data_raw" / state / "cb_2022_us_county_500k.zip")
+    shp = shp[shp["STATEFP"] == STATE_FIPS[state]]
+    est = state_estimates(state, year)
+    return {
+        "format": REGION_FORMAT,
+        "region": f"{state}_{year}",
+        "label": f"{STATE_NAME.get(state, state)} {year}",
+        "core_label": CORE_LABEL.get(state, data.names[data.core]),
+        "usd_per_wage_unit": usd_per_wage_unit(df),
+        "params": {k: v["value"] for k, v in est["params"].items()},
+        "counties": {
+            "fips": list(fips), "name": list(data.names), "kind": data.kind.tolist(),
+            "x_km": data.x.tolist(), "y_km": data.y.tolist(), "N": data.N.tolist(), "HU": data.HU.tolist(),
+            "HA": data.HA.tolist(), "L": data.L.tolist(), "TF": data.TF.tolist(), "wA_obs": data.wA_obs.tolist(),
+            "omega": data.omega.tolist(), "gateway": data.gateway.tolist(),
+        },  # fmt: skip
+        "t_min": np.round(t, 2).tolist(),
+        "dist_km": np.round(dist, 2).tolist(),
+        "geometry": county_polygons(shp, fips),
+    }
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("state")
+    ap.add_argument("year", type=int)
+    a = ap.parse_args(argv)
+    doc = region_document(a.state.upper(), a.year)
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    out = OUT_DIR / f"{doc['region']}.json"
+    out.write_text(json.dumps(doc, separators=(",", ":")) + "\n")
+    print(f"wrote {out.relative_to(ROOT)} ({out.stat().st_size} bytes)")
+
+
+if __name__ == "__main__":
+    main()

@@ -1,4 +1,22 @@
-"""The browser boundary: JSON-shaped dict in, JSON-shaped dict out. Nothing else is called from JS."""
+"""The browser boundary: JSON-shaped dict in, JSON-shaped dict out. Nothing else is called from JS.
+
+Regions. "synthetic" (the default) is built in (urqse.synthetic). A real region comes as a REGION
+DOCUMENT, passed to default_scenario() and run() as `region_doc`. It is written offline by
+`python -m urqse.data.export_web {state} {year}` to docs/migration/data/{region}.json and has this
+shape (Z = counties + the external zone, which is last and has kind "external"):
+
+    format             REGION_FORMAT
+    region             id, e.g. "IA_2022"; scenario["region"] must match it
+    label, core_label  display names, e.g. "Iowa 2022", "Polk (Des Moines)"
+    usd_per_wage_unit  dollars per model wage unit (state non-farm earnings per non-farm worker)
+    params             estimated Params fields, layered over Params() (e.g. kappa_lam, theta_T)
+    counties           columns of length Z: fips, name, kind (core|suburb|rural|external), x_km,
+                       y_km, N, HU, HA, L, TF (ha), wA_obs (wage units), omega, gateway
+    t_min, dist_km     Z x Z travel time (minutes) and distance (km), residence rows
+    geometry           Z entries for the map only (not read here): a list of polygons, each a list
+                       of rings [x0, y0, x1, y1, ...] in km in the x_km / y_km frame; null for the
+                       external zone
+"""
 
 import math
 
@@ -12,7 +30,10 @@ from .model.equilibrium import SolveInfo, solve_static
 from .model.fundamentals import TRAVEL_SCOPES, with_shocks
 from .model.immigration import immigration_path
 from .model.params import Params
-from .synthetic import synthetic_state
+from .synthetic import CountyData, synthetic_state
+
+SYNTHETIC = "synthetic"
+REGION_FORMAT = 1
 
 SCENARIO_PARAMS = (
     "alpha", "beta", "lam", "kappa_lam", "mu", "theta_T", "lam_R", "nu", "eta",
@@ -37,9 +58,45 @@ UNITS = {
 }
 
 
-def default_scenario() -> dict:
-    p = Params()
-    return {"params": {k: getattr(p, k) for k in SCENARIO_PARAMS}, "shocks": dict(DEFAULT_SHOCKS)}
+def default_scenario(region_doc: dict | None = None) -> dict:
+    """The region's defaults: Params() for the synthetic state, Params() with the region's estimates
+    on top for a region document."""
+    p = Params(**_region_params(region_doc))
+    region = region_doc["region"] if region_doc else SYNTHETIC
+    return {"region": region, "params": {k: getattr(p, k) for k in SCENARIO_PARAMS}, "shocks": dict(DEFAULT_SHOCKS)}
+
+
+# --- regions -------------------------------------------------------------------------------
+
+
+def _region_params(doc) -> dict:
+    return dict(doc["params"]) if doc else {}
+
+
+def county_data(doc: dict) -> CountyData:
+    """CountyData from a region document (shape in the module docstring)."""
+    if doc.get("format") != REGION_FORMAT:
+        raise ValueError(f"region document format must be {REGION_FORMAT}")
+    c = doc["counties"]
+    col = lambda k: np.asarray(c[k], dtype=float)  # noqa: E731
+    kind = np.asarray(c["kind"], dtype=str)
+    if np.count_nonzero(kind == "core") != 1:
+        raise ValueError("a region needs exactly one core county")
+    return CountyData(
+        names=list(c["name"]), kind=kind, x=col("x_km"), y=col("y_km"), N=col("N"), HU=col("HU"),
+        HA=col("HA"), L=col("L"), TF=col("TF"), wA_obs=col("wA_obs"), mean_nonfarm_wage=1.0,
+        omega=col("omega"), gateway=col("gateway"), dist=np.asarray(doc["dist_km"], float),
+        t=np.asarray(doc["t_min"], float),
+    )  # fmt: skip
+
+
+def _region(scenario: dict, doc):
+    region = scenario.get("region", SYNTHETIC)
+    if region == SYNTHETIC:
+        return synthetic_state(), None
+    if not doc or doc.get("region") != region:
+        raise ValueError(f"region {region!r} needs its region document")
+    return county_data(doc), doc
 
 
 # --- boundary parsing ----------------------------------------------------------------------
@@ -51,9 +108,9 @@ def _number(name, v):
     return float(v)
 
 
-def _parse(scenario: dict):
-    if not isinstance(scenario, dict):
-        raise ValueError("scenario must be an object with 'params' and 'shocks'")
+def _parse(scenario: dict, doc=None):
+    if set(scenario) - {"region", "params", "shocks"}:
+        raise ValueError("scenario keys are 'region', 'params' and 'shocks'")
     raw_p = scenario.get("params") or {}
     raw_s = scenario.get("shocks") or {}
     unknown = (set(raw_p) - set(SCENARIO_PARAMS)) | (set(raw_s) - set(DEFAULT_SHOCKS))
@@ -67,7 +124,7 @@ def _parse(scenario: dict):
             kw[k] = v
         else:
             kw[k] = _number(k, v)
-    p = Params(**kw)
+    p = Params(**{**_region_params(doc), **kw})
     s = dict(DEFAULT_SHOCKS, **raw_s)
     for k in ("core_productivity_pct", "farm_tfp_pct", "travel_cut_pct", "immigration_per_period"):
         s[k] = _number(k, s[k])
@@ -123,9 +180,11 @@ def _merge(infos, method) -> dict:
 # --- run -----------------------------------------------------------------------------------
 
 
-def run(scenario: dict) -> dict:
-    p, s = _parse(scenario)
-    data = synthetic_state()
+def run(scenario: dict, region_doc: dict | None = None) -> dict:
+    if not isinstance(scenario, dict):
+        raise ValueError("scenario must be an object with 'params' and 'shocks'")
+    data, doc = _region(scenario, region_doc)
+    p, s = _parse(scenario, doc)
     R, core, T = data.rural, data.core, s["periods"]
     urban = ~R
 
@@ -235,5 +294,42 @@ def run(scenario: dict) -> dict:
             "converged": two.converged,
         },
     }
+    if doc:
+        out.update(_real_units(doc, data, base, lr, R))
     return _json(out)
+
+
+def _real_units(doc, data, base, lr, R) -> dict:
+    """Levels in real-world units for a real region: persons, acres, dollars. Region totals use
+    every zone (the external zone included); rural totals use rural counties only."""
+    usd, acre = doc["usd_per_wage_unit"], land.HA_PER_ACRE
+    w0, w1, TF, HA0 = base.within, lr.within, data.TF, base.within.HA
+    rent_acre = lambda w: w.rho * usd * acre  # noqa: E731
+
+    def levels(f):
+        return [f(base, w0), f(lr, w1)]
+
+    region = {
+        "id": doc["region"], "label": doc["label"], "core_label": doc["core_label"], "usd_per_wage_unit": usd,
+        "units": {"rent_usd_acre": "US$ per acre per year, model farmland rent", "wA_usd": "US$ per farm worker per year",
+                  "TF_acres": "acres", "levels": "[baseline, long run]"},
+    }  # fmt: skip
+    return {
+        "region": region,
+        "levels": {
+            "rural_residents": levels(lambda e, w: e.N[R].sum()),
+            "region_residents": levels(lambda e, w: e.N_bar),
+            "land_per_farm_worker_acres": levels(lambda e, w: TF[R].sum() / w.HA[R].sum() / acre),
+            "farm_wage_usd": levels(lambda e, w: (w.wA * HA0)[R].sum() / HA0[R].sum() * usd),
+            "farmland_rent_usd_acre": levels(lambda e, w: (rent_acre(w) * TF)[R].sum() / TF[R].sum()),
+        },
+        "real": {
+            "fips": doc["counties"]["fips"],
+            "TF_acres": TF / acre,
+            "rent0_usd_acre": rent_acre(w0),
+            "rent_usd_acre": rent_acre(w1),
+            "wA0_usd": w0.wA * usd,
+            "wA_usd": w1.wA * usd,
+        },
+    }
 
