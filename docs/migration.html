@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <script>try { const t = JSON.parse(localStorage.getItem("dp.theme")); if (t) document.documentElement.dataset.theme = t; } catch {}</script>
+  <title>Urban–Rural Migration</title>
+  <meta name="description" content="Simulate how a productivity, farm or transport shock moves residents, farm jobs, wages and land prices between a city and its countryside.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22%3E%3Ccircle cx=%228%22 cy=%228%22 r=%223%22 fill=%22%232a78d6%22/%3E%3Ccircle cx=%222.5%22 cy=%223%22 r=%221.6%22 fill=%22%231baf7a%22/%3E%3Ccircle cx=%2213.5%22 cy=%2213%22 r=%221.6%22 fill=%22%231baf7a%22/%3E%3Ccircle cx=%2213%22 cy=%223%22 r=%221.6%22 fill=%22%231baf7a%22/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="migration/style.css">
+  <script src="vendor/d3.min.js"></script>
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <h1><a class="homelink" href="./" title="Back to the front page">Urban–Rural Migration</a></h1>
+    <span class="sub">A semi-closed spatial equilibrium for a city and its countryside · synthetic 25-county state</span>
+  </div>
+  <div class="top-actions">
+    <button id="themeBtn" class="ghost" title="Toggle light / dark">◐</button>
+    <a class="ghost btnlink" href="#about">About the model</a>
+  </div>
+</header>
+
+<main>
+  <section class="layout">
+    <aside class="card controls" id="controls">
+      <h2>Scenario</h2>
+      <div id="shockCtl"></div>
+      <details id="paramBox">
+        <summary>Model parameters</summary>
+        <div id="paramCtl"></div>
+      </details>
+      <div class="run-row">
+        <button id="runBtn" disabled>Run</button>
+        <button id="resetBtn" class="ghost small" title="Restore the default scenario">Reset</button>
+      </div>
+      <div id="status" class="status" aria-live="polite"></div>
+    </aside>
+
+    <div class="main-col" id="results">
+      <section class="card loading" id="loading" hidden>
+        <div class="spinner" aria-hidden="true"></div>
+        <div>
+          <h2>Starting the model in your browser</h2>
+          <p class="muted">The first visit downloads about 10 MB (Python and NumPy). Your browser caches it, so later visits start in a few seconds.</p>
+          <ol class="steps" id="steps">
+            <li data-stage="runtime">Python runtime</li>
+            <li data-stage="numpy">NumPy</li>
+            <li data-stage="model">Model package</li>
+            <li data-stage="run">First run</li>
+          </ol>
+        </div>
+      </section>
+
+      <section class="card error" id="errorCard" hidden>
+        <h2>The model could not run</h2>
+        <p id="errorMsg"></p>
+        <p class="muted small">Open <a href="migration.html?fixture">migration.html?fixture</a> to see the page with sample results.</p>
+      </section>
+
+      <section class="card unconverged" id="gate" hidden>
+        <h2>The solver did not converge</h2>
+        <p>These settings did not reach an equilibrium, so no results are shown. Try a smaller shock or different parameters. Details are under Diagnostics.</p>
+      </section>
+
+      <div id="output" hidden>
+        <section class="card">
+          <div class="card-head">
+            <h2>Long-run effects</h2>
+            <span class="muted small" id="scenarioLine"></span>
+          </div>
+          <div class="tiles" id="tiles"></div>
+        </section>
+
+        <section class="card">
+          <div class="card-head">
+            <h2>Counties</h2>
+            <div class="row gap wrap">
+              <div class="seg" role="tablist" aria-label="Map view">
+                <button class="ghost small on" data-view="long">Long run</button>
+                <button class="ghost small" data-view="path">Over time</button>
+              </div>
+              <label id="metricWrap">Colour by
+                <select id="metric"></select>
+              </label>
+            </div>
+          </div>
+          <div class="map-wrap"><svg id="map" role="img" aria-label="Map of counties coloured by percent change"></svg></div>
+          <div class="scrub" id="scrubRow" hidden>
+            <button id="playBtn" class="ghost small" title="Play the path">▶</button>
+            <input id="scrub" type="range" min="0" max="60" step="1" value="0" aria-label="Period">
+            <output id="scrubOut">t = 0</output>
+          </div>
+          <div class="map-legend" id="mapLegend"></div>
+          <details class="table-box">
+            <summary>County table</summary>
+            <div class="table-wrap"><table id="countyTable"></table></div>
+          </details>
+        </section>
+
+        <section class="card">
+          <div class="card-head">
+            <h2>Adjustment path</h2>
+            <span class="muted small" id="stopLine"></span>
+          </div>
+          <div class="charts2 even">
+            <figure>
+              <figcaption>Farmland per farm worker, rural counties, by period (1 = start)</figcaption>
+              <div class="legend" id="lpwLegend"></div>
+              <svg id="lpwChart"></svg>
+            </figure>
+            <figure>
+              <figcaption>Rural share of residents, by period (%)</figcaption>
+              <svg id="ruralChart"></svg>
+            </figure>
+          </div>
+          <p class="muted small">Click a chart to show that period on the map.</p>
+        </section>
+
+        <section class="card">
+          <div class="card-head"><h2>Land and floor-space prices</h2></div>
+          <figure>
+            <figcaption>Price index by period (1 = start)</figcaption>
+            <div class="legend" id="priceLegend"></div>
+            <svg id="priceChart"></svg>
+          </figure>
+        </section>
+      </div>
+
+      <section class="card" id="diagCard" hidden>
+        <div class="card-head">
+          <h2>Diagnostics</h2>
+          <span id="badge" class="badge"></span>
+        </div>
+        <div class="diag" id="diag"></div>
+      </section>
+
+      <section class="card" id="about">
+        <h2>About the model</h2>
+        <div class="prose">
+          <p><b>Places.</b> The region is a set of counties: one core city, its suburbs and rural counties. Every county has two kinds of jobs, non-farm and farm. Farm output uses labour and farmland; non-farm output uses labour and commercial floor space.</p>
+          <p><b>Choices.</b> Each person picks where to live and where to work. Commuting costs rise with travel time, so most people work near home. Where they live depends on wages they can reach, floor rents and local amenities. People change residence slowly, which gives an adjustment path over many periods.</p>
+          <p><b>A semi-closed region.</b> The parameter η sets how open the region is to the rest of the country. In this version η = 0: nobody moves in from elsewhere in the country, so a growing city fills from its own countryside. International immigration is an optional, exogenous number of arrivals per period, who settle by the same rules as residents.</p>
+          <p><b>When the path stops.</b> The countryside “has enough people for the land” when farmland per farm worker in rural counties has risen by the consolidation target ε (for example 10%). The path stops at that period, at a steady state, or at the horizon, whichever comes first.</p>
+          <p><b>Land.</b> Farmland is partly worked by owner-operators and partly rented from landlords. Land income is wealth: a farmer who moves keeps it, so by default it does not hold people in place. Farmland and urban land are priced as the present value of the rents the model produces, which is how the page reports wealth changes for farmers who stay and farmers who leave.</p>
+          <p class="muted">Version 1 runs on a synthetic 25-county state so every result can be checked against known answers. Calibration to Iowa counties is a later milestone. The model is solved in your browser with Python (Pyodide); the page only draws what the solver returns, and hides results whenever the solver fails to converge.</p>
+        </div>
+      </section>
+    </div>
+  </section>
+</main>
+<div id="tooltip" class="tooltip" hidden></div>
+<script type="module" src="migration/app.js"></script>
+</body>
+</html>

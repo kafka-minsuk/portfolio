@@ -1,0 +1,16 @@
+[project]
+name = "urqse"
+version = "0.1.0"
+description = "Semi-closed urban-rural quantitative spatial equilibrium (pure numpy)"
+requires-python = ">=3.11"
+dependencies = ["numpy"]
+
+[project.optional-dependencies]
+test = ["pytest", "hypothesis"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

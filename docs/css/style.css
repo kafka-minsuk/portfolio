@@ -187,3 +187,6 @@ td.est { color: var(--muted); font-style: italic; }
   #map { height: 280px; }
   .topbar .sub { display: none; }
 }
+
+.homelink { color: inherit; text-decoration: none; }
+.homelink:hover { text-decoration: underline; text-underline-offset: 3px; }
