@@ -7,7 +7,8 @@ from .blocks import logsumexp
 
 def arrival_shares(lnu, delta, gateway, nu):
     """Pr(n) proportional to g_n exp((ln u_n + delta_n) / nu)."""
-    z = np.log(gateway) + (lnu + delta) / nu
+    with np.errstate(divide="ignore"):  # g_n = 0 is a county with no arrivals
+        z = np.log(gateway) + (lnu + delta) / nu
     return np.exp(z - logsumexp(z))
 
 

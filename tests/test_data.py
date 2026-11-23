@@ -299,3 +299,14 @@ def test_to_number_handles_codes():
     s = bs.to_number(pd.Series(["1,234", "(D)", " 5 ", "(NA)", "-3"]))
     assert s.iloc[0] == 1234 and np.isnan(s.iloc[1]) and s.iloc[2] == 5 and np.isnan(s.iloc[3]) and s.iloc[4] == -3
 
+
+
+def test_zero_gateway_gets_no_arrivals():
+    import warnings
+
+    from urqse.model.immigration import arrival_shares
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        s = arrival_shares(np.zeros(3), np.zeros(3), np.array([1.0, 0.0, 2.0]), 2.0)
+    assert s[1] == 0.0 and abs(s.sum() - 1.0) < 1e-12
