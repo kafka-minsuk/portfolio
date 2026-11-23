@@ -7,6 +7,8 @@ dependencies = ["numpy"]
 
 [project.optional-dependencies]
 test = ["pytest", "hypothesis"]
+# Offline data build only (src/urqse/data); the model and the browser bundle never import these.
+data = ["pandas", "pyarrow", "pandera", "geopandas", "rasterio"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
