@@ -1,0 +1,17 @@
+{
+  "state": "IA",
+  "year": 2022,
+  "params": {
+    "kappa_lam": {
+      "value": 0.020766166506714197,
+      "se_cluster_origin": 0.0007198025930574382,
+      "source": "PPML on LODES8 OD JT00 2022 county pairs, in-state, off-diagonal, origin + destination FE, OSRM car minutes (urqse.calibrate.run_state)",
+      "verify": true
+    },
+    "theta_T": {
+      "value": 0.45627267963184465,
+      "source": "state rent share: NASS 2022 non-irrigated cash rent x CDL cropland over (BEA CAINC45 farm earnings + rent paid to non-operator landlords) (spec \u00a75 step 5)",
+      "verify": true
+    }
+  }
+}

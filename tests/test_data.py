@@ -269,6 +269,7 @@ def test_bundle_excludes_data_package_and_api_needs_no_pandas(tmp_path):
         sys.path.pop(0)
     names = zipfile.ZipFile(build_py_bundle.build(tmp_path / "b.zip")).namelist()
     assert "urqse/api.py" in names and not any(n.startswith("urqse/data/") for n in names)
+    assert not {"urqse/" + f for f in build_py_bundle.OFFLINE} & set(names)
     code = "import sys, urqse.api; sys.exit(int(any(m in sys.modules for m in ('pandas', 'rasterio', 'pandera'))))"
     assert subprocess.run([sys.executable, "-c", code], cwd=ROOT).returncode == 0
 

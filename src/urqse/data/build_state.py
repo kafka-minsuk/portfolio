@@ -192,6 +192,12 @@ def read_counties(path: Path):
     return gpd.read_file(f"zip://{path}").set_index("GEOID").sort_index()
 
 
+def neighbor_counties(shp, sf: str, st_geom) -> list:
+    """Out-of-state counties within NEIGHBOR_BUFFER_M of the state: the external zone's locations."""
+    nb = shp[(shp["STATEFP"] != sf)].to_crs(5070)
+    return sorted(nb.index[nb.intersects(st_geom.buffer(NEIGHBOR_BUFFER_M))])
+
+
 def _one_period(x: pd.DataFrame) -> pd.DataFrame:
     """Census rows are 'END OF DEC' at some levels and 'YEAR' at others; keep one period per level,
     preferring the annual one."""
@@ -491,9 +497,7 @@ def build(state: str, year: int, raw: Path, out: Path) -> dict:
 
     # locations: population centres, projected (UTM 15N) for x/y
     df["lat"], df["lon"] = cen.loc[fips, "lat"], cen.loc[fips, "lon"]
-    nb = shp[(shp["STATEFP"] != sf)].to_crs(5070)
-    nb = nb[nb.intersects(st_geom.buffer(NEIGHBOR_BUFFER_M))]
-    nb_fips = sorted(nb.index)
+    nb_fips = neighbor_counties(shp, sf, st_geom)
     pts = cen.loc[fips + nb_fips]
     t_pts, d_road, n_calls = osrm_table(pts[["lon", "lat"]].to_numpy(), raw / "osrm")
     if np.isnan(t_pts).any():

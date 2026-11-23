@@ -1,6 +1,7 @@
 """Zip src/urqse into docs/py/urqse.zip for Pyodide. Deterministic: sorted entries, fixed
 timestamps and permissions, .py files only, so an unchanged package gives a byte-identical zip.
-urqse/data (the offline build, which needs pandas/rasterio) is left out: the browser never uses it."""
+urqse/data (the offline build, which needs pandas/rasterio) and the real-data estimation modules in
+urqse/calibrate are left out: the browser never uses them."""
 
 import sys
 import zipfile
@@ -11,11 +12,15 @@ SRC = ROOT / "src"
 OUT = ROOT / "docs" / "py" / "urqse.zip"
 EPOCH = (1980, 1, 1, 0, 0, 0)
 EXCLUDE = ("__pycache__", "data")  # path parts under src/urqse never shipped
+OFFLINE = {"calibrate/run_state.py", "calibrate/report.py", "calibrate/gravity.py", "calibrate/checks.py"}
 
 
 def build(out: Path = OUT) -> Path:
     pkg = SRC / "urqse"
-    files = sorted(p for p in pkg.rglob("*.py") if not set(p.relative_to(pkg).parts) & set(EXCLUDE))
+    files = sorted(
+        p for p in pkg.rglob("*.py")
+        if not set(p.relative_to(pkg).parts) & set(EXCLUDE) and p.relative_to(pkg).as_posix() not in OFFLINE
+    )
     out.parent.mkdir(parents=True, exist_ok=True)
     tmp = out.with_suffix(".zip.tmp")
     with zipfile.ZipFile(tmp, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
