@@ -55,7 +55,7 @@ The region file's shape is documented in `src/urqse/api.py`. The exporter needs 
 ## Publish to GitHub Pages (one command)
 
 ```bash
-./deploy.sh <github-account> [repo-name]      # default repo name: demography-pyramids
+./deploy.sh <github-account> [repo-name]      # default repo name: portfolio
 ```
 
 The script switches `gh` to that account for this run, commits as `minsuk0504@snu.ac.kr`, creates the repo if needed,

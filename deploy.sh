@@ -6,7 +6,7 @@
 set -euo pipefail
 
 GH_ACCOUNT="${1:-}"
-REPO="${2:-demography-pyramids}"
+REPO="${2:-portfolio}"
 VISIBILITY="--public"
 [[ "${3:-}" == "--private" ]] && VISIBILITY="--private"   # Pages on private repos needs a paid plan
 EMAIL="minsuk0504@snu.ac.kr"
