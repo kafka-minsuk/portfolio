@@ -6,6 +6,9 @@ const css = name => getComputedStyle(document.documentElement).getPropertyValue(
 const FIXTURE = new URLSearchParams(location.search).has("fixture");
 const TOL = 1e-8;
 
+// the page opens on real Iowa data; ?fixture keeps the synthetic sample result
+const START_REGION = "IA_2022";
+
 const DEFAULT_SCENARIO = {
   region: "synthetic",
   params: { alpha: 0.75, beta: 0.8, lam: 6.8, kappa_lam: 0.08, mu: 0.5, theta_T: 0.40, lam_R: 3.0, nu: 2.0, eta: 0.0,
@@ -448,82 +451,38 @@ function drawTable(r) {
     `<tr><td>${esc(c.name)}</td><td>${KIND_LABEL[c.kind] || c.kind}</td><td>${int(c.N0)}</td><td>${int(L.N[i])}</td><td>${pct(L.dN_pct[i])}</td><td>${pct(L.HA_pct[i])}</td><td>${pct(L.wA_pct[i])}</td><td>${pct(L.rho_pct[i])}</td>${rent(i)}<td>${pct(L.r_pct[i])}</td><td>${Math.round(c.omega * 100)}%</td></tr>`).join("")}</tbody>`;
 }
 
-// ------------------------------------------------------------------ line charts (single y axis each)
-function lineChart(sel, { t, series, refs = [], vlines = [], yFmt: fmt, tipFmt = fmt }) {
-  const svg = d3.select(sel), node = svg.node();
-  const W = node.clientWidth, H = node.clientHeight;
-  const direct = series.length > 1;
-  const M = { t: 12, r: direct ? 92 : 16, b: 28, l: 48 };
-  svg.attr("viewBox", `0 0 ${W} ${H}`).selectAll("*").remove();
-  const x = d3.scaleLinear().domain(d3.extent(t)).range([M.l, W - M.r]);
-  const all = [...series.flatMap(s => s.values), ...refs.map(r => r.y)];
-  let [lo, hi] = d3.extent(all);
-  const span = hi - lo || Math.abs(hi) * 0.02 || 0.01;
-  const y = d3.scaleLinear().domain([lo - span * 0.08, hi + span * 0.08]).nice().range([H - M.b, M.t]);
-  // small moves (real regions) need more decimals than the default format to tell ticks apart
-  const ticks = y.ticks(5);
-  const yFmt = new Set(ticks.map(fmt)).size === ticks.length ? fmt : d3.format(`.${d3.precisionFixed(ticks[1] - ticks[0])}f`);
-
-  svg.append("g").attr("class", "grid").attr("transform", `translate(${M.l},0)`)
-    .call(d3.axisLeft(y).ticks(5).tickSize(-(W - M.l - M.r)).tickFormat("")).call(g => g.select(".domain").remove());
-  svg.append("g").attr("class", "axis").attr("transform", `translate(0,${H - M.b})`).call(d3.axisBottom(x).ticks(Math.min(8, W / 70)).tickSizeOuter(0));
-  svg.append("g").attr("class", "axis").attr("transform", `translate(${M.l},0)`).call(d3.axisLeft(y).ticks(5).tickFormat(yFmt).tickSizeOuter(0))
-    .call(g => g.select(".domain").remove());
-
-  for (const r of refs) {
-    svg.append("line").attr("class", "ref").attr("x1", M.l).attr("x2", W - M.r).attr("y1", y(r.y)).attr("y2", y(r.y));
-    svg.append("text").attr("class", "direct").attr("x", M.l + 6).attr("y", y(r.y) - 5).text(r.label);
-  }
-  for (const v of vlines) {
-    svg.append("line").attr("class", v.cls).attr("x1", x(v.x)).attr("x2", x(v.x)).attr("y1", M.t).attr("y2", H - M.b);
-    if (v.label) svg.append("text").attr("class", "direct").attr("x", x(v.x) + (x(v.x) > W * 0.7 ? -5 : 5)).attr("y", M.t + 12)
-      .attr("text-anchor", x(v.x) > W * 0.7 ? "end" : "start").text(v.label);
-  }
-  const line = vals => d3.line().x((_, i) => x(t[i])).y(v => y(v))(vals);
-  for (const s of series) {
-    svg.append("path").attr("class", "series").attr("stroke", s.color).attr("d", line(s.values));
-    if (direct) svg.append("text").attr("class", "direct").attr("x", W - M.r + 6).attr("y", y(s.values.at(-1)) + 4).text(s.name);
-  }
-
-  // hover layer: crosshair + per-series dots + tooltip; click picks a period for the map
-  const cursor = svg.append("line").attr("class", "cursor").attr("y1", M.t).attr("y2", H - M.b).style("display", "none");
-  const dots = series.map(s => svg.append("circle").attr("class", "dot").attr("r", 4).attr("fill", s.color).style("display", "none"));
-  const idxAt = ev => d3.bisectCenter(t, x.invert(d3.pointer(ev, node)[0]));
-  svg.append("rect").attr("x", M.l).attr("y", M.t).attr("width", W - M.l - M.r).attr("height", H - M.t - M.b)
-    .attr("fill", "transparent").style("cursor", "crosshair")
-    .on("mousemove", ev => {
-      const i = idxAt(ev);
-      cursor.style("display", null).attr("x1", x(t[i])).attr("x2", x(t[i]));
-      dots.forEach((d, k) => d.style("display", null).attr("cx", x(t[i])).attr("cy", y(series[k].values[i])));
-      showTip(`<b>Period ${t[i]}</b>` + series.map(s => `<div class="r"><span><i class="sw" style="background:${s.color}"></i>${s.name}</span><b>${tipFmt(s.values[i])}</b></div>`).join(""), ev);
-    })
-    .on("mouseleave", () => { cursor.style("display", "none"); dots.forEach(d => d.style("display", "none")); hideTip(); })
-    .on("click", ev => setPeriod(idxAt(ev)));
-}
-
-const legendHTML = items => items.map(([kind, color, label]) =>
-  `<span><i class="${kind}" style="background:${color}"></i>${label}</span>`).join("");
-
+// ------------------------------------------------------------------ change since start (the path settles within a few periods)
 const STOP_TEXT = {
   consolidation: p => `Consolidation target reached at period ${p}`,
   steady_state: p => `Steady state at period ${p}, before the consolidation target`,
   horizon: p => `Reached the horizon at period ${p} without consolidating`,
 };
 
-function drawPath(r) {
-  const P = r.path, t = P.t, stop = P.stop || {};
-  const scrub = S.view === "path" ? [{ x: t[S.period], cls: "scrubline" }] : [];
-  const stopV = stop.period != null ? [{ x: stop.period, cls: "stop", label: `stop · t=${stop.period}` }] : [];
+// first period by which a series has made 90% of its move from period 0 to the last period
+function settledBy(v) {
+  const total = v.at(-1) - v[0];
+  if (Math.abs(total) < 1e-12) return null;
+  return v.findIndex(x => (x - v[0]) / total >= 0.9);
+}
+
+function drawChange(r) {
+  const P = r.path, t = P.t, stop = P.stop || {}, last = t.length - 1;
   $("stopLine").textContent = stop.period != null ? STOP_TEXT[stop.reason]?.(stop.period) ?? `Stopped at period ${stop.period}` : "The path did not stop";
-  const c1 = css("--s1"), c2 = css("--s2");
-  $("lpwLegend").innerHTML = legendHTML([["line", c1, "Farmland per farm worker"], ["dash", "", `Target ${P.target_ratio.toFixed(2)} (1 + ε)`], ["line", css("--text"), "Stop"]]);
-  lineChart("#lpwChart", { t, series: [{ name: "Land per worker", values: P.land_per_worker_ratio, color: c1 }],
-    refs: [{ y: P.target_ratio, label: `target ${P.target_ratio.toFixed(2)}` }], vlines: [...stopV, ...scrub], yFmt: d3.format(".2f"), tipFmt: d3.format(".3f") });
-  lineChart("#ruralChart", { t, series: [{ name: "Rural share", values: P.rural_share.map(v => v * 100), color: c1 }],
-    vlines: [...stopV, ...scrub], yFmt: d3.format(".1f"), tipFmt: v => v.toFixed(2) + "%" });
-  $("priceLegend").innerHTML = legendHTML([["line", c1, "Farmland price"], ["line", c2, "Urban floor rent"]]);
-  lineChart("#priceChart", { t, series: [{ name: "Farmland price", values: P.farmland_price_index, color: c1 }, { name: "Urban rent", values: P.urban_rent_index, color: c2 }],
-    vlines: [...stopV, ...scrub], yFmt: d3.format(".2f"), tipFmt: d3.format(".3f") });
+  const target = `target ${pct((P.target_ratio - 1) * 100, 0)} (ε)`;
+  const cells = [
+    { k: "Farmland per farm worker", sub: `rural counties, ${target}`, v: P.land_per_worker_ratio, fmt: d3.format(".3f"), chg: v => pct((v.at(-1) / v[0] - 1) * 100, 2) },
+    { k: "Rural share of residents", sub: "percentage points", v: P.rural_share.map(x => x * 100), fmt: x => x.toFixed(2) + "%", chg: v => signed(v.at(-1) - v[0], 2) + " pp" },
+    { k: "Farmland price", sub: "index, start = 1", v: P.farmland_price_index, fmt: d3.format(".3f"), chg: v => pct((v.at(-1) / v[0] - 1) * 100, 2) },
+    { k: "Urban floor rent", sub: "index, start = 1", v: P.urban_rent_index, fmt: d3.format(".3f"), chg: v => pct((v.at(-1) / v[0] - 1) * 100, 2) },
+  ];
+  $("changeGrid").innerHTML = cells.map(c => {
+    const by = settledBy(c.v);
+    const when = by == null ? "No change" : `<button class="linkish" data-period="${by}">90% of the change by period ${t[by]}</button>`;
+    return `<div class="change"><div class="k">${c.k} <span class="muted">· ${c.sub}</span></div>
+      <div class="v">${c.chg(c.v)}</div>
+      <div class="s">${c.fmt(c.v[0])} → ${c.fmt(c.v[last])} at period ${t[last]}</div><div class="s">${when}</div></div>`;
+  }).join("");
+  for (const b of $("changeGrid").querySelectorAll("button[data-period]")) b.addEventListener("click", () => setPeriod(Number(b.dataset.period)));
 }
 
 // ------------------------------------------------------------------ diagnostics
@@ -558,7 +517,7 @@ function render() {
   if (!r || $("output").hidden) return;
   drawTiles(r);
   drawMap(r);
-  drawPath(r);
+  drawChange(r);
   drawTable(r);
   $("scrub").max = r.path.t.length - 1;
   $("scrub").value = S.period;
@@ -624,8 +583,8 @@ async function main() {
     setStatus("Starting the model…");
     backend = workerBackend(onStage);
     try {
-      const d = await backend.defaults("synthetic");
-      S.scenario = { region: "synthetic", params: { ...DEFAULT_SCENARIO.params, ...d.params }, shocks: { ...DEFAULT_SCENARIO.shocks, ...d.shocks } };
+      const [d] = await Promise.all([backend.defaults(START_REGION), loadGeo(START_REGION)]);
+      S.scenario = { region: START_REGION, params: { ...DEFAULT_SCENARIO.params, ...d.params }, shocks: { ...DEFAULT_SCENARIO.shocks, ...d.shocks } };
       syncControls();
     } catch (err) {
       return showError(err.message);

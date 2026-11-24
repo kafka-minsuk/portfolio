@@ -15,7 +15,7 @@
 <header class="topbar">
   <div class="brand">
     <h1><a class="homelink" href="./" title="Back to the front page">Urban–Rural Migration</a></h1>
-    <span class="sub">A semi-closed spatial equilibrium for a city and its countryside · <span id="regionSub">synthetic 25-county state</span></span>
+    <span class="sub">A semi-closed spatial equilibrium for a city and its countryside · <span id="regionSub">Iowa 2022, 99 counties</span></span>
   </div>
   <div class="top-actions">
     <button id="themeBtn" class="ghost" title="Toggle light / dark">◐</button>
@@ -110,30 +110,10 @@
 
         <section class="card">
           <div class="card-head">
-            <h2>Adjustment path</h2>
+            <h2>Change since start</h2>
             <span class="muted small" id="stopLine"></span>
           </div>
-          <div class="charts2 even">
-            <figure>
-              <figcaption>Farmland per farm worker, rural counties, by period (1 = start)</figcaption>
-              <div class="legend" id="lpwLegend"></div>
-              <svg id="lpwChart"></svg>
-            </figure>
-            <figure>
-              <figcaption>Rural share of residents, by period (%)</figcaption>
-              <svg id="ruralChart"></svg>
-            </figure>
-          </div>
-          <p class="muted small">Click a chart to show that period on the map.</p>
-        </section>
-
-        <section class="card">
-          <div class="card-head"><h2>Land and floor-space prices</h2></div>
-          <figure>
-            <figcaption>Price index by period (1 = start)</figcaption>
-            <div class="legend" id="priceLegend"></div>
-            <svg id="priceChart"></svg>
-          </figure>
+          <div class="change-grid" id="changeGrid"></div>
         </section>
       </div>
 
