@@ -1,4 +1,4 @@
-# Lab for Exploration
+# Exploration Lab
 
 Interactive population pyramids by single year of age / birth year for every country and UN region,
 1950–2100, with:
