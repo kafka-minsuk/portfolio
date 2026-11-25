@@ -46,12 +46,29 @@
     .choice .shot { background: var(--surface-2); border-radius: 10px; height: 200px; overflow: hidden; }
     .choice .shot img { width: 100%; height: 100%; object-fit: cover; display: block; }
     .site .go::after { content: " ↗"; }
+    .gallery { columns: 3 260px; column-gap: 20px; }
+    .photo {
+      display: block; break-inside: avoid; margin: 0 0 20px; padding: 10px; background: #fff;
+      box-shadow: 0 1px 2px rgba(0,0,0,.08), 0 6px 18px rgba(0,0,0,.10); transition: transform .15s, box-shadow .15s;
+    }
+    .photo:hover, .photo:focus-visible { transform: translateY(-2px); box-shadow: 0 2px 4px rgba(0,0,0,.10), 0 10px 26px rgba(0,0,0,.16); outline: none; }
+    .photo img { display: block; width: 100%; height: auto; }
+    .lightbox { position: fixed; inset: 0; z-index: 100; background: rgba(12,12,14,.94); display: grid; place-items: center; }
+    .lightbox[hidden] { display: none; }
+    .lightbox img { max-width: calc(100vw - 120px); max-height: calc(100vh - 80px); border: 12px solid #fff; box-sizing: border-box; box-shadow: 0 10px 40px rgba(0,0,0,.5); }
+    .lb-btn { position: absolute; background: none; border: 0; color: #fff; font-size: 40px; line-height: 1; padding: 12px 16px; cursor: pointer; opacity: .75; }
+    .lb-btn:hover, .lb-btn:focus-visible { opacity: 1; }
+    .lb-close { top: 8px; right: 8px; } .lb-prev { left: 4px; top: 50%; transform: translateY(-50%); } .lb-next { right: 4px; top: 50%; transform: translateY(-50%); }
     @media (max-width: 760px) {
       .landing { padding-top: 20px; }
       .choices { grid-template-columns: 1fr; }
       .choice .art { height: 160px; }
       .choice .art svg { height: 136px; }
       .choice .shot { height: 160px; }
+      .gallery { columns: 2; column-gap: 12px; }
+      .photo { padding: 6px; margin-bottom: 12px; }
+      .lightbox img { max-width: calc(100vw - 24px); max-height: calc(100vh - 120px); border-width: 8px; }
+      .lb-prev, .lb-next { top: auto; bottom: 12px; transform: none; }
       .intro h2 { font-size: 22px; }
     }
   </style>
@@ -142,7 +159,50 @@
       <span class="go">Visit site</span>
     </a>
   </section>
+
+  <hr class="divider">
+
+  <section class="intro">
+    <h2>Casual Snaps</h2>
+    <p>Relaxed photos of friends and couples out in the city.</p>
+  </section>
+
+  <section class="gallery" aria-label="Casual Snaps">
+    <a class="photo" href="photos/casual/casual-01.webp"><img src="photos/casual/casual-01-thumb.webp" width="703" height="900" alt="Casual snap 1" loading="lazy" decoding="async"></a>
+    <a class="photo" href="photos/casual/casual-02.webp"><img src="photos/casual/casual-02-thumb.webp" width="600" height="900" alt="Casual snap 2" loading="lazy" decoding="async"></a>
+    <a class="photo" href="photos/casual/casual-03.webp"><img src="photos/casual/casual-03-thumb.webp" width="600" height="900" alt="Casual snap 3" loading="lazy" decoding="async"></a>
+    <a class="photo" href="photos/casual/casual-04.webp"><img src="photos/casual/casual-04-thumb.webp" width="587" height="900" alt="Casual snap 4" loading="lazy" decoding="async"></a>
+    <a class="photo" href="photos/casual/casual-05.webp"><img src="photos/casual/casual-05-thumb.webp" width="598" height="900" alt="Casual snap 5" loading="lazy" decoding="async"></a>
+    <a class="photo" href="photos/casual/casual-06.webp"><img src="photos/casual/casual-06-thumb.webp" width="583" height="900" alt="Casual snap 6" loading="lazy" decoding="async"></a>
+    <a class="photo" href="photos/casual/casual-07.webp"><img src="photos/casual/casual-07-thumb.webp" width="900" height="590" alt="Casual snap 7" loading="lazy" decoding="async"></a>
+    <a class="photo" href="photos/casual/casual-08.webp"><img src="photos/casual/casual-08-thumb.webp" width="746" height="900" alt="Casual snap 8" loading="lazy" decoding="async"></a>
+  </section>
+
+  <hr class="divider">
+
+  <section class="intro">
+    <h2>Profile Shoots</h2>
+    <p>Portraits for professional profiles, résumés and social media.</p>
+  </section>
+
+  <section class="gallery" aria-label="Profile Shoots">
+    <a class="photo" href="photos/profile/profile-01.webp"><img src="photos/profile/profile-01-thumb.webp" width="600" height="900" alt="Profile portrait 1" loading="lazy" decoding="async"></a>
+    <a class="photo" href="photos/profile/profile-02.webp"><img src="photos/profile/profile-02-thumb.webp" width="675" height="900" alt="Profile portrait 2" loading="lazy" decoding="async"></a>
+    <a class="photo" href="photos/profile/profile-03.webp"><img src="photos/profile/profile-03-thumb.webp" width="675" height="900" alt="Profile portrait 3" loading="lazy" decoding="async"></a>
+    <a class="photo" href="photos/profile/profile-04.webp"><img src="photos/profile/profile-04-thumb.webp" width="675" height="900" alt="Profile portrait 4" loading="lazy" decoding="async"></a>
+    <a class="photo" href="photos/profile/profile-05.webp"><img src="photos/profile/profile-05-thumb.webp" width="600" height="900" alt="Profile portrait 5" loading="lazy" decoding="async"></a>
+    <a class="photo" href="photos/profile/profile-06.webp"><img src="photos/profile/profile-06-thumb.webp" width="600" height="900" alt="Profile portrait 6" loading="lazy" decoding="async"></a>
+    <a class="photo" href="photos/profile/profile-07.webp"><img src="photos/profile/profile-07-thumb.webp" width="600" height="900" alt="Profile portrait 7" loading="lazy" decoding="async"></a>
+    <a class="photo" href="photos/profile/profile-08.webp"><img src="photos/profile/profile-08-thumb.webp" width="600" height="900" alt="Profile portrait 8" loading="lazy" decoding="async"></a>
+  </section>
 </main>
+
+<div class="lightbox" id="lightbox" hidden>
+  <button class="lb-btn lb-close" aria-label="Close">×</button>
+  <button class="lb-btn lb-prev" aria-label="Previous photo">‹</button>
+  <img alt="">
+  <button class="lb-btn lb-next" aria-label="Next photo">›</button>
+</div>
 
 <script>
   const NS = "http://www.w3.org/2000/svg";
@@ -169,6 +229,26 @@
     dots.append(el("circle", { class: "rural", cx: x, cy: y, r: 5 }));
     if (i % 2 === 0) flows.append(el("path", { class: "flow", d: `M${100 + 54 * Math.cos(a)},${75 + 54 * Math.sin(a)} L${100 + 22 * Math.cos(a)},${75 + 22 * Math.sin(a)}` }));
   }
+
+  // Lightbox: each gallery section is browsed on its own.
+  const lb = document.getElementById("lightbox"), lbImg = lb.querySelector("img");
+  let set = [], idx = 0;
+  const show = i => { idx = (i + set.length) % set.length; lbImg.src = set[idx].href; lbImg.alt = set[idx].querySelector("img").alt; };
+  const close = () => { lb.hidden = true; lbImg.removeAttribute("src"); document.body.style.overflow = ""; };
+  document.querySelectorAll(".gallery").forEach(g => {
+    const links = [...g.querySelectorAll(".photo")];
+    links.forEach((a, i) => a.addEventListener("click", e => {
+      e.preventDefault(); set = links; show(i); lb.hidden = false; document.body.style.overflow = "hidden"; lb.querySelector(".lb-close").focus();
+    }));
+  });
+  lb.querySelector(".lb-close").addEventListener("click", close);
+  lb.querySelector(".lb-prev").addEventListener("click", () => show(idx - 1));
+  lb.querySelector(".lb-next").addEventListener("click", () => show(idx + 1));
+  lb.addEventListener("click", e => { if (e.target === lb) close(); });
+  document.addEventListener("keydown", e => {
+    if (lb.hidden) return;
+    if (e.key === "Escape") close(); else if (e.key === "ArrowLeft") show(idx - 1); else if (e.key === "ArrowRight") show(idx + 1);
+  });
 
   document.getElementById("themeBtn").addEventListener("click", () => {
     const root = document.documentElement;
