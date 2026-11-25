@@ -44,7 +44,7 @@ M3 = w_A,obs from BEA farm earnings (wages + proprietors' income) per BEA farm j
 | model owner-operated land rent omega rho T^F, $M | 2,879 | 2,974 |
 | model farm worker income (§12.1 operator income x H_A), $M | 9,986 | 6,990 |
 |   / BEA farm earnings 2022 | 1.01 | 0.71 |
-| labour + owner rent + landlord rent = w_A H_A + rho T^F (rel. error) | -1e-16 | 0e+00 |
+| labour + owner rent + landlord rent = w_A H_A + rho T^F (rel. error) | -3e-16 | 0e+00 |
 
 **Operator-income double count.** In M3, w_A H_A already held proprietors' income, owned-land rent included, and §12.1 then added omega rho T^F on top (2,879 $M counted twice); model farm worker income came to 1.01x BEA farm earnings in a record year only because the M2 job scaling had cut w_A H_A to 0.72 of those earnings. Now w_A H_A is compensation at the hired rate only, so the land rent enters once. The model's farm worker income is 6,990 $M against BEA farm earnings of 9,845 $M in 2022 and 5,362 $M on the 2018 to 2022 mean (1.30x). In 2022 BEA earnings exceed labour at the hired rate plus owned-land cash rent by the rest of proprietors' income (returns to operators' capital, livestock and the boom); on the 5-year mean they fall short, i.e. operators earned less than the hired wage plus a market rent on their land in an average year (inferred from these two totals). The income identity holds to rounding in both.
 
@@ -52,10 +52,10 @@ M3 = w_A,obs from BEA farm earnings (wages + proprietors' income) per BEA farm j
 
 | Parameter set | wage contraction | baseline solve | max rel. error HU / HA / wA / N |
 |---|---|---|---|
-| default `Params()` | converged=True, 68 it, residual 9.5e-14 | converged=True, residual 2.3e-13 | 5.8e-13 / 5.7e-13 / 0.0e+00 / 8.9e-16 |
-| Iowa estimates | converged=True, 14 it, residual 4.1e-14 | converged=True, residual 1.6e-13 | 2.6e-13 / 2.6e-13 / 0.0e+00 / 8.9e-16 |
+| default `Params()` | converged=True, 67 it, residual 9.9e-14 | converged=True, residual 2.6e-13 | 6.4e-13 / 6.4e-13 / 0.0e+00 / 8.9e-16 |
+| Iowa estimates | converged=True, 14 it, residual 4.0e-14 | converged=True, residual 1.6e-13 | 2.6e-13 / 2.6e-13 / 0.0e+00 / 8.9e-16 |
 
-The inversion is exact on real data: the calibrated fundamentals regenerate jobs, farm wages and residents to better than 1e-12 (bar 1e-7). Flow offsets: converged=True, residual 8.7e-12.
+Largest relative error of the calibrated fundamentals against jobs, farm wages and residents: 2.6e-13 (bar 1e-7). Flow offsets: converged=True, residual 6.6e-12.
 
 ## 2. Farm-job wedge xi_A
 
@@ -130,11 +130,11 @@ ln E[flow_ij] = FE_i + FE_j - kappa*lam t_ij, by Poisson pseudo-ML (Newton, nump
 | Sample | kappa*lam | SE cluster | SE robust | SE plain | pairs | zeros | pseudo-R2 | converged (residual) |
 |---|---|---|---|---|---|---|---|---|
 | in-state, off-diagonal (headline) | 0.0208 | 0.0007 | 0.0004 | 0.00003 | 9702 | 1145 | 0.935 | True (3e-13) |
-| in-state, own-county flows included | 0.0357 | 0.0011 | 0.0011 | 0.00003 | 9801 | 1145 | 0.945 | True (1e-10) |
+| in-state, own-county flows included | 0.0357 | 0.0011 | 0.0011 | 0.00003 | 9801 | 1145 | 0.945 | True (2e-15) |
 | in-state, off-diagonal, t <= 90 min | 0.0522 | 0.0008 | 0.0008 | 0.00014 | 1001 | 3 | 0.992 | True (1e-15) |
 | in-state, off-diagonal, t <= 60 min | 0.0537 | 0.0023 | 0.0021 | 0.00036 | 372 | 0 | 0.996 | True (2e-11) |
 | with external zone, off-diagonal | 0.0221 | 0.0008 | 0.0005 | 0.00003 | 9900 | 1145 | 0.901 | True (7e-12) |
-| with external zone, own-county included | 0.0357 | 0.0011 | 0.0011 | 0.00003 | 9999 | 1145 | 0.943 | True (2e-15) |
+| with external zone, own-county included | 0.0357 | 0.0011 | 0.0011 | 0.00003 | 9999 | 1145 | 0.943 | True (1e-15) |
 
 The headline 0.0208 per minute is about 26% of the 0.08 default. The exponential-in-minutes form does not fit all trip lengths with one slope: restricted to pairs within 90 minutes it is 0.0522, within 60 minutes 0.0537, close to the default. Long pairs (median in-state off-diagonal time 203 min) carry more flow than a steep exponential allows (weekly commuters, multi-site employers, LODES assigning jobs to a firm's reporting address are candidate reasons, not tested). Including own-county flows gives 0.0357: the 58% of workers who stay in their county pin the slope at the short end through the area-based own-time proxy, so that number is partly a property of the proxy. The headline is the spec's specification on all off-diagonal pairs; the model uses one kappa*lam for every pair including own, so this choice matters for counterfactuals. `# VERIFY`.
 

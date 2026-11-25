@@ -1,8 +1,9 @@
 """Offline build of one state's county table (spec §8):  python -m urqse.data.build_state IA 2022
 
-Downloads go to data_raw/{state}/ and are reused when present, so a rerun is offline.
-Outputs go to data/{state}/{year}/: county.parquet, travel.npz and REPORT.md.
-Only Iowa 2022 has been built and checked; other states need their own source vintages."""
+Downloads are reused when present, so a rerun is offline. National files (Census, BEA, NASS, GHSL
+tiles, LODES) go to data_raw/US/ and are shared by every state; state files (CDL, OSRM) go to
+data_raw/{state}/. Outputs go to data/{state}/{year}/: county.parquet, travel.npz and REPORT.md.
+Iowa 2022 is the checked reference build; UNSUPPORTED lists the states the 2022 sources cannot build."""
 
 import argparse
 import datetime as dt
@@ -24,8 +25,47 @@ from .loaders import COUNTY_FILE, TRAVEL_FILE, state_dir
 from .schema import COLUMNS, COUNTY_SCHEMA, EXTERNAL_FIPS, validate_travel
 
 ROOT = Path(__file__).resolve().parents[3]
-STATE_FIPS = {"IA": "19"}
-STATE_NAME = {"IA": "Iowa"}
+SHARED_RAW = ROOT / "data_raw" / "US"
+# The 50 states and DC: postal code -> (FIPS, name).
+STATES = {
+    "AL": ("01", "Alabama"), "AK": ("02", "Alaska"), "AZ": ("04", "Arizona"), "AR": ("05", "Arkansas"),
+    "CA": ("06", "California"), "CO": ("08", "Colorado"), "CT": ("09", "Connecticut"), "DE": ("10", "Delaware"),
+    "DC": ("11", "District of Columbia"), "FL": ("12", "Florida"), "GA": ("13", "Georgia"), "HI": ("15", "Hawaii"),
+    "ID": ("16", "Idaho"), "IL": ("17", "Illinois"), "IN": ("18", "Indiana"), "IA": ("19", "Iowa"),
+    "KS": ("20", "Kansas"), "KY": ("21", "Kentucky"), "LA": ("22", "Louisiana"), "ME": ("23", "Maine"),
+    "MD": ("24", "Maryland"), "MA": ("25", "Massachusetts"), "MI": ("26", "Michigan"), "MN": ("27", "Minnesota"),
+    "MS": ("28", "Mississippi"), "MO": ("29", "Missouri"), "MT": ("30", "Montana"), "NE": ("31", "Nebraska"),
+    "NV": ("32", "Nevada"), "NH": ("33", "New Hampshire"), "NJ": ("34", "New Jersey"), "NM": ("35", "New Mexico"),
+    "NY": ("36", "New York"), "NC": ("37", "North Carolina"), "ND": ("38", "North Dakota"), "OH": ("39", "Ohio"),
+    "OK": ("40", "Oklahoma"), "OR": ("41", "Oregon"), "PA": ("42", "Pennsylvania"), "RI": ("44", "Rhode Island"),
+    "SC": ("45", "South Carolina"), "SD": ("46", "South Dakota"), "TN": ("47", "Tennessee"), "TX": ("48", "Texas"),
+    "UT": ("49", "Utah"), "VT": ("50", "Vermont"), "VA": ("51", "Virginia"), "WA": ("53", "Washington"),
+    "WV": ("54", "West Virginia"), "WI": ("55", "Wisconsin"), "WY": ("56", "Wyoming"),
+}  # fmt: skip
+STATE_FIPS = {k: v[0] for k, v in STATES.items()}
+STATE_NAME = {k: v[1] for k, v in STATES.items()}
+FIPS_STATE = {v: k for k, v in STATE_FIPS.items()}
+# States the 2022 sources cannot build as a county region (checked 2026-11-24).
+UNSUPPORTED = {
+    "AK": "BEA reports farm employment 0 or (NA) in every borough, and BEA, NASS and the 2022 county file "
+          "use different borough/census-area geographies; most boroughs are not on the road network.",
+    "CT": "PEP, ACS and the 2022 county file use the 9 planning regions; BEA and the Census of Agriculture "
+          "still use the 8 old counties, which cut across them.",
+    "DC": "One county-equivalent with no farm jobs: no rural counties to consolidate.",
+    "HI": "Islands: no road links between counties and no neighbouring state for the external commuting zone.",
+}
+# BEA CAEMP25N 2022 farm employment (L70) is 0 in these counties; the model needs H_A > 0 in every
+# zone (it works in log H_A). Left out by decision (2026-11-24) rather than changing the model.
+NO_FARM_COUNTIES = {
+    "CA": "Alpine, San Francisco", "CO": "Clear Creek, Gilpin, Lake, San Juan", "FL": "Franklin, Gulf, Monroe",
+    "LA": "Orleans", "MA": "Nantucket, Suffolk", "MD": "Baltimore city", "MI": "Crawford, Keweenaw", "MN": "Cook",
+    "MO": "St. Louis city", "NC": "Dare", "NJ": "Hudson", "NM": "Los Alamos", "NV": "Storey",
+    "NY": "Bronx, Hamilton, Kings, New York, Queens, Richmond",
+    "VA": "Arlington, Alexandria city, Hampton city, Newport News city, Norfolk city, Portsmouth city, "
+          "Richmond city, Roanoke city",
+    "WI": "Menominee", "WV": "McDowell, Mingo",
+}  # fmt: skip
+UNSUPPORTED |= {st: f"No farm jobs in {c} (BEA 2022); the model needs farm jobs in every county." for st, c in NO_FARM_COUNTIES.items()}
 
 ACRE_HA = 0.40468564224  # exact (international acre)
 STOREY_HEIGHT_M = 3.0  # floor space = building volume / storey height. source=GHSL GHS-BUILT-V is volume only  # VERIFY
@@ -44,8 +84,32 @@ NASS_BASE = "https://www.nass.usda.gov/sites/default/files/datasets/"
 FARM_WAGE_YEARS = 5
 
 
-# GHSL 1000 km tiles covering the state (row = 9000 km north edge down, col = 18041 km west edge east).
-GHSL_TILES = {"IA": ("R4_C10", "R4_C11", "R5_C10", "R5_C11")}
+# GHSL tiles: 1000 km squares on the Mollweide grid; row 1 has its north edge at y = 9000 km,
+# column 1 its west edge at x = -18041 km (read off the R4_C10 tile bounds, 2026-11-24).
+GHSL_TILE_M = 1_000_000.0
+GHSL_ORIGIN_M = (-18_041_000.0, 9_000_000.0)
+
+
+def ghsl_tiles(geoms_mollweide) -> tuple:
+    """Tile ids ('R{row}_C{col}') of every tile that a geometry (ESRI:54009 metres) intersects."""
+    from shapely.geometry import box
+
+    b = np.array([g.bounds for g in geoms_mollweide])
+    x0, y0 = GHSL_ORIGIN_M
+    cols = range(int((b[:, 0].min() - x0) // GHSL_TILE_M) + 1, int((b[:, 2].max() - x0) // GHSL_TILE_M) + 2)
+    rows = range(int((y0 - b[:, 3].max()) // GHSL_TILE_M) + 1, int((y0 - b[:, 1].min()) // GHSL_TILE_M) + 2)
+    out = []
+    for r in rows:
+        for c in cols:
+            tile = box(x0 + (c - 1) * GHSL_TILE_M, y0 - r * GHSL_TILE_M, x0 + c * GHSL_TILE_M, y0 - (r - 1) * GHSL_TILE_M)
+            if any(g.intersects(tile) for g in geoms_mollweide):
+                out.append(f"R{r}_C{c}")
+    return tuple(out)
+
+
+def utm_epsg(lon_min: float, lon_max: float) -> int:
+    """NAD83 / UTM zone (EPSG 269xx) at the middle longitude: the x_km / y_km frame of a state."""
+    return 26900 + int((0.5 * (lon_min + lon_max) + 180.0) // 6.0) + 1
 
 
 @dataclass(frozen=True)
@@ -54,9 +118,11 @@ class Source:
     url: str
     file: str  # path under data_raw/{state}/
     vintage: str
+    shared: bool = True  # national file under data_raw/US; False = the state's own folder
 
 
-def sources(state: str, year: int) -> dict:
+def sources(state: str, year: int, tiles: tuple = ()) -> dict:
+    """Source files; `tiles` are the state's GHSL tiles (ghsl_tiles), known once the county file is read."""
     s = STATE_FIPS[state]
     acs = f"https://www2.census.gov/programs-surveys/acs/summary_file/{year}/table-based-SF/data/5YRData/"
     ghsl = (
@@ -79,12 +145,12 @@ def sources(state: str, year: int) -> dict:
         Source("bea_earn", "https://apps.bea.gov/regional/zip/CAINC5N.zip", "bea_CAINC5N.zip",
                "BEA CAINC5N, file dated 2026-01-14"),
         Source("cdl", f"https://nassgeodata.gmu.edu/axis2/services/CDLService/GetCDLFile?year={year}&fips={s}",
-               f"CDL_{year}_{s}.tif", f"USDA NASS Cropland Data Layer {year}, 30 m, clipped to state FIPS {s}"),
+               f"CDL_{year}_{s}.tif", f"USDA NASS Cropland Data Layer {year}, 30 m, clipped to state FIPS {s}", shared=False),
     ]
     for t in ("b08007", "b08604", "b05005"):
         out.append(Source(f"acs_{t}", f"{acs}acsdt5y{year}-{t}.dat", f"acs/acsdt5y{year}-{t}.dat",
                           f"ACS {year - 4}-{year} 5-year, table-based summary file {t.upper()}"))
-    for rc in GHSL_TILES[state]:
+    for rc in tiles:
         f = f"GHS_BUILT_V_E2020_GLOBE_R2023A_54009_100_V1_0_{rc}.zip"
         out.append(Source(f"ghsl_{rc}", ghsl + f, f"ghsl/{f}", "GHSL GHS-BUILT-V R2023A, epoch 2020, 100 m, Mollweide"))
     return {x.name: x for x in out}  # fmt: skip
@@ -104,28 +170,34 @@ def curl(url: str, dest: Path) -> Path:
     return dest
 
 
-def fetch(src: Source, raw: Path) -> Path:
+def source_path(src: Source, raw: Path, shared: Path = SHARED_RAW) -> Path:
+    return (shared if src.shared else raw) / src.file
+
+
+def fetch(src: Source, raw: Path, shared: Path = SHARED_RAW) -> Path:
+    dest = source_path(src, raw, shared)
     if src.name == "cdl":  # the CropScape service returns XML naming the GeoTIFF to download
-        dest = raw / src.file
         if not dest.exists():
-            xml = curl(src.url, raw / (src.file + ".xml")).read_text()
+            xml = curl(src.url, dest.with_name(dest.name + ".xml")).read_text()
             curl(re.search(r"<returnURL>(.*?)</returnURL>", xml).group(1), dest)
         return dest
-    return curl(src.url, raw / src.file)
+    return curl(src.url, dest)
 
 
-def fetch_nass_economics(raw: Path, state: str) -> tuple[Path, str]:
-    """Quick Stats bulk economics file, filtered to the state and cached (the full file is ~0.6 GB)."""
+def fetch_nass_economics(raw: Path, state: str, shared: Path = SHARED_RAW) -> tuple[Path, str]:
+    """Quick Stats bulk economics file (national, ~0.6 GB, in `shared`), filtered to the state and
+    cached in the state's folder."""
     cached = sorted(raw.glob(f"qs.economics_*_{state}.tsv.gz"))
     if cached:
         return cached[-1], cached[-1].name.replace(f"_{state}.tsv.gz", ".txt.gz")
-    full = sorted(raw.glob("qs.economics_????????.txt.gz"))
+    full = sorted(shared.glob("qs.economics_????????.txt.gz"))
     if not full:
-        index = curl(NASS_INDEX, raw / "nass_datasets_index.html").read_text(errors="replace")
+        index = curl(NASS_INDEX, shared / "nass_datasets_index.html").read_text(errors="replace")
         name = sorted(set(re.findall(r"qs\.economics_\d{8}\.txt\.gz", index)))[-1]
-        full = [curl(NASS_BASE + name, raw / name)]
+        full = [curl(NASS_BASE + name, shared / name)]
     src = full[-1]
     out = raw / src.name.replace(".txt.gz", f"_{state}.tsv.gz")
+    out.parent.mkdir(parents=True, exist_ok=True)
     tmp = out.with_name(out.name + ".part")
     tag = f"\t{state}\t"
     with gzip.open(src, "rt", encoding="utf-8", errors="replace") as f, gzip.open(tmp, "wt") as o:
@@ -180,7 +252,7 @@ def read_metro_counties(path: Path) -> set:
     df = pd.read_csv(path, encoding="latin-1", dtype=str)
     metro = set(df.loc[df["LSAD"] == "Metropolitan Statistical Area", "CBSA"])
     rows = df[(df["LSAD"] == "County or equivalent") & df["CBSA"].isin(metro)]
-    return set(rows["STCOU"])
+    return set(rows["STCOU"].str.zfill(5))  # the file drops the leading zero of state FIPS 01-09
 
 
 def read_cenpop(path: Path) -> pd.DataFrame:
@@ -193,6 +265,62 @@ def read_counties(path: Path):
     import geopandas as gpd
 
     return gpd.read_file(f"zip://{path}").set_index("GEOID").sort_index()
+
+
+def bea_combinations(bea_zip: Path, state: str, shp_state) -> dict:
+    """BEA combination areas (Virginia's independent cities folded into a county, Maui + Kalawao):
+    BEA code -> (name, member county FIPS). Names read 'County, City + City, VA*': the first name is
+    a county, the rest are independent cities (a county only when no city has that name)."""
+    with zipfile.ZipFile(bea_zip) as z:
+        member = next(n for n in z.namelist() if re.search(rf"_{state}_\d{{4}}_\d{{4}}\.csv$", n))
+        df = pd.read_csv(z.open(member), encoding="latin-1", dtype=str, usecols=["GeoFIPS", "GeoName"])
+    df["GeoFIPS"] = df["GeoFIPS"].str.strip(' "')
+    by_lsad = dict(zip(shp_state["NAMELSAD"], shp_state.index))
+    out = {}
+    for code, name in df.drop_duplicates("GeoFIPS")[["GeoFIPS", "GeoName"]].itertuples(index=False):
+        if not re.fullmatch(r"\d{5}", str(code)) or code in shp_state.index or "+" not in str(name):
+            continue
+        label = re.sub(r",\s*[A-Z]{2}\*?$", "", name.strip())
+        parts = [x.strip() for x in re.split(r",|\+", label) if x.strip()]
+        members = []
+        for i, part in enumerate(parts):
+            base = part.removesuffix(" City")
+            tries = [f"{part} County"] if i == 0 else [f"{base} city", f"{part} County"]
+            hit = next((by_lsad[t] for t in tries if t in by_lsad), None)
+            if hit is None:
+                raise ValueError(f"BEA area {code} {name!r}: no county or city named {part!r}")
+            members.append(hit)
+        out[code] = (label, members)
+    return out
+
+
+def state_zones(shp, bea_zip: Path, state: str):
+    """The state's model zones: county-file counties, with BEA combination areas merged so that every
+    source can be put on BEA's geography. Returns (zones GeoDataFrame indexed by zone FIPS with NAME,
+    NAMELSAD, ALAND, STATEFP, geometry; dict county FIPS -> zone FIPS)."""
+    sf = STATE_FIPS[state]
+    cty = shp[shp["STATEFP"] == sf]
+    combos = bea_combinations(bea_zip, state, cty)
+    zone_of = {f: f for f in cty.index}
+    for code, (_, members) in combos.items():
+        zone_of.update({m: code for m in members})
+    z = cty.assign(zone=[zone_of[f] for f in cty.index])
+    zones = z.dissolve(by="zone", aggfunc={"ALAND": "sum", "NAME": "first", "NAMELSAD": "first", "STATEFP": "first"})
+    for code, (label, _) in combos.items():
+        zones.loc[code, ["NAME", "NAMELSAD"]] = label
+    zones.index.name = "GEOID"
+    return zones.sort_index(), zone_of
+
+
+def to_zones(values: pd.Series, zone_of: dict, weight: pd.Series | None = None) -> pd.Series:
+    """County values -> zone values: sums, or weighted means when `weight` is given (missing members
+    are skipped; a zone with no published member stays NaN)."""
+    v = values[values.index.isin(list(zone_of))]
+    key = v.index.map(zone_of)
+    if weight is None:
+        return v.groupby(key).sum(min_count=1)
+    w = weight.reindex(v.index).fillna(0.0).where(v.notna(), 0.0)
+    return (v.fillna(0.0) * w).groupby(key).sum() / w.groupby(key).sum().replace(0.0, np.nan)
 
 
 def neighbor_counties(shp, sf: str, st_geom) -> list:
@@ -209,23 +337,35 @@ def _one_period(x: pd.DataFrame) -> pd.DataFrame:
 
 
 def nass_series(df: pd.DataFrame, short_desc: str, year: int, source: str, state_fips: str) -> dict:
-    """County values plus the published state and 'other (combined) counties' values."""
+    """County values plus the published state and 'other (combined) counties' values; `other` is the
+    statewide combined row (ASD 99) and `other_by_district` the per-district combined rows."""
     x = df[(df["SHORT_DESC"] == short_desc) & (df["YEAR"] == str(year)) & (df["SOURCE_DESC"] == source)
            & (df["DOMAIN_DESC"] == "TOTAL")]  # fmt: skip
     cty = _one_period(x[(x["AGG_LEVEL_DESC"] == "COUNTY") & x["COUNTY_ANSI"].fillna("").str.fullmatch(r"\d{3}")])
     other = _one_period(x[(x["AGG_LEVEL_DESC"] == "COUNTY") & (x["COUNTY_NAME"].str.contains("OTHER", na=False))])
+    asd = other["ASD_CODE"] if "ASD_CODE" in other else pd.Series("99", index=other.index)
+    by_district = pd.Series(to_number(other["VALUE"]).to_numpy(), index=asd.to_numpy())
+    statewide = by_district[by_district.index == "99"]
     st = _one_period(x[x["AGG_LEVEL_DESC"] == "STATE"])
     values = pd.Series(to_number(cty["VALUE"]).to_numpy(), index=state_fips + cty["COUNTY_ANSI"])
     return {
         "county": values[~values.index.duplicated()],
         "suppressed": sorted(state_fips + cty.loc[to_number(cty["VALUE"]).isna().to_numpy(), "COUNTY_ANSI"]),
-        "other": float(to_number(other["VALUE"]).iloc[0]) if len(other) else np.nan,
+        "other": float(statewide.iloc[0]) if len(statewide) else np.nan,
+        "other_by_district": by_district[by_district.index != "99"].dropna(),
         "state": float(to_number(st["VALUE"]).iloc[0]) if len(st) else np.nan,
     }
 
 
+def county_districts(df: pd.DataFrame, state_fips: str) -> pd.Series:
+    """County FIPS -> NASS agricultural statistics district (ASD_CODE), from any county row."""
+    x = df[(df["AGG_LEVEL_DESC"] == "COUNTY") & df["COUNTY_ANSI"].fillna("").str.fullmatch(r"\d{3}")]
+    x = x.drop_duplicates("COUNTY_ANSI")
+    return pd.Series(x["ASD_CODE"].to_numpy(), index=state_fips + x["COUNTY_ANSI"])
+
+
 def read_nass(path: Path) -> pd.DataFrame:
-    cols = ["SOURCE_DESC", "SHORT_DESC", "DOMAIN_DESC", "AGG_LEVEL_DESC", "STATE_ALPHA", "COUNTY_ANSI",
+    cols = ["SOURCE_DESC", "SHORT_DESC", "DOMAIN_DESC", "AGG_LEVEL_DESC", "STATE_ALPHA", "ASD_CODE", "COUNTY_ANSI",
             "COUNTY_NAME", "YEAR", "REFERENCE_PERIOD_DESC", "VALUE"]  # fmt: skip
     return pd.read_csv(path, sep="\t", dtype=str, usecols=cols)
 
@@ -233,14 +373,15 @@ def read_nass(path: Path) -> pd.DataFrame:
 # --- pure transforms -----------------------------------------------------------------------
 
 
-def fill_suppressed(values: np.ndarray, total: float, weight: np.ndarray):
-    """Give suppressed (NaN) cells the published total minus the disclosed sum, split by weight."""
+def fill_suppressed(values: np.ndarray, total: float, weight: np.ndarray, signed: bool = False):
+    """Give suppressed (NaN) cells the published total minus the disclosed sum, split by weight.
+    `signed`: the line can be negative (earnings), so a negative residual is allowed."""
     values = np.asarray(values, float)
     miss = np.isnan(values)
     if not miss.any():
         return values, miss
     residual = total - values[~miss].sum()
-    if not np.isfinite(residual) or residual < 0 or weight[miss].sum() <= 0:
+    if not np.isfinite(residual) or (residual < 0 and not signed) or weight[miss].sum() <= 0:
         raise ValueError(f"cannot allocate residual {residual} over {miss.sum()} suppressed cells")
     out = values.copy()
     out[miss] = residual * weight[miss] / weight[miss].sum()
@@ -290,6 +431,8 @@ def county_kinds(fips, HU, metro: set) -> np.ndarray:
     """core = the metro county with the most non-farm jobs; suburb = other metro counties;
     rural = non-metro. # VERIFY: a single core is a model simplification for a multi-metro state."""
     is_metro = np.array([f in metro for f in fips])
+    if not is_metro.any():
+        raise ValueError("no county is in a Metropolitan Statistical Area: no core county")
     kind = np.where(is_metro, "suburb", "rural").astype(object)
     kind[int(np.argmax(np.where(is_metro, HU, -np.inf)))] = "core"
     return kind
@@ -415,26 +558,28 @@ def osrm_table(lonlat: np.ndarray, cache: Path):
 # --- assembly ------------------------------------------------------------------------------
 
 
-def build(state: str, year: int, raw: Path, out: Path) -> dict:
+def build(state: str, year: int, raw: Path, out: Path, shared: Path = SHARED_RAW) -> dict:
     sf = STATE_FIPS[state]
-    src = sources(state, year)
-    files = {k: fetch(v, raw) for k, v in src.items()}
-    nass_path, nass_name = fetch_nass_economics(raw, state)
-    gaps = []
-
-    shp = read_counties(files["counties"])
-    fips = sorted(shp.index[shp["STATEFP"] == sf])
+    base = sources(state, year)
+    shp = read_counties(fetch(base["counties"], raw, shared))
+    zones, zone_of = state_zones(shp, fetch(base["bea_emp"], raw, shared), state)
+    fips = list(zones.index)
     Z = len(fips)
-    st_geom = shp.loc[fips].to_crs(5070).union_all()
+    st_geom = zones.to_crs(5070).union_all()
+    src = sources(state, year, ghsl_tiles(list(zones.to_crs("ESRI:54009").geometry)))
+    files = {k: fetch(v, raw, shared) for k, v in src.items()}
+    nass_path, nass_name = fetch_nass_economics(raw, state, shared)
+    gaps = []
+    merged = {z: sorted(f for f, zz in zone_of.items() if zz == z) for z in set(zone_of.values()) if z not in zone_of}
 
-    # BEA jobs and earnings
+    # BEA jobs and earnings (already on BEA's geography = the zones)
     emp = read_bea(files["bea_emp"], state, year, {"HA_bea": 70, "HU_bea": 80, "HA_prop_bea": 50, "jobs_bea": 10})
     farm = read_bea(files["bea_farm"], state, year, {"farm_earn": 370, "farm_ws": 350, "farm_supp": 360})
     earn = read_bea(files["bea_earn"], state, year, {"nonfarm_earn": 82, "farm_earn_cainc5n": 81})
     st = f"{sf}000"
     bea = pd.concat([emp, farm, earn], axis=1)
     bea["farm_comp"] = bea["farm_ws"] + bea["farm_supp"]
-    # ACS workers and recent immigrants; PEP population
+    # ACS workers and recent immigrants; PEP population (county level, summed to zones)
     acs = pd.concat([
         read_acs(files["acs_b08007"], {"B08007_E001": "workers_res", "B08007_E005": "workers_out_state"}, sf),
         read_acs(files["acs_b08604"], {"B08604_E001": "workers_work"}, sf),
@@ -444,35 +589,38 @@ def build(state: str, year: int, raw: Path, out: Path) -> dict:
     cen = read_cenpop(files["cenpop"])
 
     df = pd.DataFrame(index=pd.Index(fips, name="fips"))
-    df["name"] = shp.loc[fips, "NAME"]
-    df["area_km2"] = shp.loc[fips, "ALAND"].astype(float) / 1e6
-    df["pop"] = pep.reindex(fips)
+    df["name"] = zones["NAME"]
+    df["area_km2"] = zones["ALAND"].astype(float) / 1e6
+    df["pop"] = to_zones(pep, zone_of).reindex(fips)
     for c in ("workers_res", "workers_out_state", "workers_work", "fb_recent"):
-        df[c] = acs[c].reindex(fips)
+        df[c] = to_zones(acs[c], zone_of).reindex(fips)
     for c in ("HU_bea", "HA_bea", "HA_prop_bea"):
         df[c] = bea[c].reindex(fips)
     df["farm_earn_usd"] = bea["farm_earn"].reindex(fips) * 1e3
     df["nonfarm_earn_usd"] = bea["nonfarm_earn"].reindex(fips) * 1e3
 
-
     # rasters: farmland (CDL) and floor space (GHSL)
-    geoms_cdl = list(shp.loc[fips].to_crs(5070).geometry)
+    geoms_cdl = list(zones.to_crs(5070).geometry)
     areas = zonal_class_area(files["cdl"], geoms_cdl)
     df["TF"] = areas[:, CDL_CROP].sum(axis=1) / 1e4
     df["pasture_ha"] = areas[:, CDL_PASTURE].sum(axis=1) / 1e4
     cdl_total_ha = areas.sum() / 1e4
-    geoms_ghsl = list(shp.loc[fips].to_crs("ESRI:54009").geometry)
+    geoms_ghsl = list(zones.to_crs("ESRI:54009").geometry)
     df["built_volume_m3"] = zonal_sum([f"zip+file://{files[k]}!{files[k].stem}.tif" for k in src if k.startswith("ghsl_")], geoms_ghsl)
     df["L"] = df["built_volume_m3"] / STOREY_HEIGHT_M
 
-    # BEA suppression (none for IA 2022, but the rule is here): residual of the state total by farmland
-    for c, w in (("HA_bea", "TF"), ("HU_bea", "pop"), ("farm_earn_usd", "TF"), ("nonfarm_earn_usd", "pop")):
-        total = {"HA_bea": bea.loc[st, "HA_bea"], "HU_bea": bea.loc[st, "HU_bea"],
-                 "farm_earn_usd": bea.loc[st, "farm_earn"] * 1e3, "nonfarm_earn_usd": bea.loc[st, "nonfarm_earn"] * 1e3}[c]  # fmt: skip
-        df[c], miss = fill_suppressed(df[c].to_numpy(), total, df[w].to_numpy())
+    # BEA suppression: residual of the state total, split by farmland (farm lines) or population
+    totals = {"HA_bea": bea.loc[st, "HA_bea"], "HU_bea": bea.loc[st, "HU_bea"], "HA_prop_bea": bea.loc[st, "HA_prop_bea"],
+              "farm_earn_usd": bea.loc[st, "farm_earn"] * 1e3, "nonfarm_earn_usd": bea.loc[st, "nonfarm_earn"] * 1e3}  # fmt: skip
+    for c, w in (("HA_bea", "TF"), ("HU_bea", "pop"), ("HA_prop_bea", "TF"), ("farm_earn_usd", "TF"), ("nonfarm_earn_usd", "pop")):
+        df[c], miss = fill_suppressed(df[c].to_numpy(), totals[c], df[w].to_numpy(), signed=c.endswith("earn_usd"))
         gaps += [dict(var=c, fips=f, rule=f"state total minus disclosed counties, split by {w}") for f in np.array(fips)[miss]]
+    no_farm = df.index[~(df["HA_bea"] > 0)]
+    if len(no_farm):
+        raise ValueError(f"{state}: no farm jobs (BEA CAEMP25N L70 = 0) in {', '.join(df.loc[no_farm, 'name'])}; "
+                         "the model needs H_A > 0 in every zone")  # fmt: skip
 
-    # NASS: tenure, land values, cash rents
+    # NASS: tenure, land values, cash rents (county rows summed to zones; per-acre values weighted)
     nass = read_nass(nass_path)
     owned = nass_series(nass, "AG LAND, OWNED, IN FARMS - ACRES", 2022, "CENSUS", sf)
     rented = nass_series(nass, "AG LAND, RENTED FROM OTHERS, IN FARMS - ACRES", 2022, "CENSUS", sf)
@@ -480,11 +628,11 @@ def build(state: str, year: int, raw: Path, out: Path) -> dict:
     cropland = nass_series(nass, "AG LAND, CROPLAND - ACRES", 2022, "CENSUS", sf)
     value = nass_series(nass, "AG LAND, INCL BUILDINGS - ASSET VALUE, MEASURED IN $ / ACRE", 2022, "CENSUS", sf)
     rent = nass_series(nass, "RENT, CASH, CROPLAND, NON-IRRIGATED - EXPENSE, MEASURED IN $ / ACRE", year, "SURVEY", sf)
-    df["owned_acres"] = owned["county"].reindex(fips)
-    df["rented_acres"] = rented["county"].reindex(fips)
-    df["farmland_census_ha"] = farmland["county"].reindex(fips) * ACRE_HA
-    df["cropland_census_ha"] = cropland["county"].reindex(fips) * ACRE_HA
-    df["land_value_usd_acre"] = value["county"].reindex(fips)
+    df["owned_acres"] = to_zones(owned["county"], zone_of).reindex(fips)
+    df["rented_acres"] = to_zones(rented["county"], zone_of).reindex(fips)
+    df["farmland_census_ha"] = to_zones(farmland["county"], zone_of).reindex(fips) * ACRE_HA
+    df["cropland_census_ha"] = to_zones(cropland["county"], zone_of).reindex(fips) * ACRE_HA
+    df["land_value_usd_acre"] = to_zones(value["county"], zone_of, farmland["county"]).reindex(fips)
     # tenure identity: land in farms = owned + rented from others
     for a, b in (("owned_acres", "rented_acres"), ("rented_acres", "owned_acres")):
         m = df[a].isna() & df[b].notna() & df["farmland_census_ha"].notna()
@@ -495,37 +643,56 @@ def build(state: str, year: int, raw: Path, out: Path) -> dict:
     m = df["omega"].isna()
     df.loc[m, "omega"] = state_omega
     gaps += [dict(var="omega", fips=f, rule="state owner share") for f in df.index[m]]
-    df["cash_rent_usd_acre"] = rent["county"].reindex(fips)
+    df["cash_rent_usd_acre"] = to_zones(rent["county"], zone_of, cropland["county"]).reindex(fips)
     df["cash_rent_filled"] = df["cash_rent_usd_acre"].isna()
-    fill = rent["other"] if np.isfinite(rent["other"]) else rent["state"]
-    rule = "NASS 'other (combined) counties' value" if np.isfinite(rent["other"]) else "NASS state value"
-    gaps += [dict(var="cash_rent_usd_acre", fips=f, rule=f"not published; {rule} = {fill:g} $/acre")
-             for f in df.index[df["cash_rent_filled"]]]  # fmt: skip
-    df["cash_rent_usd_acre"] = df["cash_rent_usd_acre"].fillna(fill)
+    district = county_districts(nass, sf)
+    for f in df.index[df["cash_rent_filled"]]:
+        asd = district.reindex(merged.get(f, [f])).dropna()
+        d_val = rent["other_by_district"].reindex(asd.to_numpy()).dropna()
+        if len(d_val):
+            fill, rule = float(d_val.mean()), f"NASS 'other (combined) counties' value of district {asd.iloc[0]}"
+        elif np.isfinite(rent["other"]):
+            fill, rule = rent["other"], "NASS 'other (combined) counties' value"
+        elif np.isfinite(rent["state"]):
+            fill, rule = rent["state"], "NASS state value"
+        else:
+            raise ValueError(f"{state}: no NASS {year} non-irrigated cropland cash rent for {df.loc[f, 'name']} or the state")
+        df.loc[f, "cash_rent_usd_acre"] = fill
+        gaps.append(dict(var="cash_rent_usd_acre", fips=f, rule=f"not published; {rule} = {fill:g} $/acre"))
     for name, s in (("land_value_usd_acre", value), ("owned_acres", owned), ("rented_acres", rented)):
-        gaps += [dict(var=name, fips=f, rule="(D) in Census of Ag; see fills above") for f in s["suppressed"]]
+        gaps += [dict(var=name, fips=zone_of.get(f, f), rule="(D) in Census of Ag; see fills above") for f in s["suppressed"]]
 
     # farm labour earnings: compensation per farm wage-and-salary job, FARM_WAGE_YEARS mean,
-    # applied to every BEA farm job (hired and proprietor) -> the county's farm labour bill in $
+    # applied to every BEA farm job (hired and proprietor) -> the county's farm labour bill in $.
+    # A county-year with suppressed compensation or no wage jobs takes that year's state ratio.
     wage_years = range(year - FARM_WAGE_YEARS + 1, year + 1)
-    comp, ws_jobs, index = [], [], []
+    per_job, index, state_per_job = [], [], []
     for y in wage_years:
         f_y = read_bea(files["bea_farm"], state, y, {"ws": 350, "supp": 360}) * 1e3
         e_y = read_bea(files["bea_emp"], state, y, {"farm": 70, "prop": 50, "nonfarm": 80})
         nfe_y = read_bea(files["bea_earn"], state, y, {"nfe": 82}).loc[st, "nfe"] * 1e3
-        comp.append((f_y["ws"] + f_y["supp"]).reindex(fips).to_numpy(float))
-        ws_jobs.append((e_y["farm"] - e_y["prop"]).reindex(fips).to_numpy(float))
+        comp_y = (f_y["ws"] + f_y["supp"]).reindex(fips).to_numpy(float)
+        jobs_y = (e_y["farm"] - e_y["prop"]).reindex(fips).to_numpy(float)
+        state_y = (f_y.loc[st, "ws"] + f_y.loc[st, "supp"]) / (e_y.loc[st, "farm"] - e_y.loc[st, "prop"])
+        with np.errstate(divide="ignore", invalid="ignore"):
+            ratio = comp_y / jobs_y
+        bad = ~(np.isfinite(ratio) & (ratio > 0))
+        ratio[bad] = state_y
+        gaps += [dict(var="farm_comp_per_ws_job", fips=f, rule=f"{y}: compensation (D) or no farm wage jobs; state value")
+                 for f in np.array(fips)[bad]]  # fmt: skip
+        per_job.append(ratio)
+        state_per_job.append(state_y)
         index.append(nfe_y / e_y.loc[st, "nonfarm"])
-    df["farm_comp_usd"] = comp[-1]
-    df["farm_labour_bill_usd"] = farm_wage_per_job(comp, ws_jobs, index) * df["HA_bea"]
+        if y == year:
+            df["farm_comp_usd"] = comp_y
+    df["farm_labour_bill_usd"] = farm_wage_per_job(per_job, np.ones_like(per_job), index) * df["HA_bea"]
     df["wA_bea_earn_usd"] = df["farm_earn_usd"] / df["HA_bea"]
     hired = nass_series(nass, "LABOR, HIRED - EXPENSE, MEASURED IN $", 2022, "CENSUS", sf)
     contract = nass_series(nass, "LABOR, CONTRACT - EXPENSE, MEASURED IN $", 2022, "CENSUS", sf)
-    df["hired_labor_coa_usd"] = hired["county"].reindex(fips)
-    gaps += [dict(var="hired_labor_coa_usd", fips=f, rule="(D) in Census of Ag; left null (comparison column only)")
+    df["hired_labor_coa_usd"] = to_zones(hired["county"], zone_of).reindex(fips)
+    gaps += [dict(var="hired_labor_coa_usd", fips=zone_of.get(f, f), rule="(D) in Census of Ag; left null (comparison column only)")
              for f in hired["suppressed"]]  # fmt: skip
-    farm_wage = dict(years=(wage_years[0], wage_years[-1]), index=index,
-                     comp_per_ws_job=[c.sum() / j.sum() for c, j in zip(comp, ws_jobs)])
+    farm_wage = dict(years=(wage_years[0], wage_years[-1]), index=index, comp_per_ws_job=state_per_job)
 
     # jobs = workers with the external zone
     jobs = reconcile_jobs(*(df[c].to_numpy(float) for c in ("workers_res", "workers_out_state", "workers_work", "HU_bea", "HA_bea")))
@@ -535,15 +702,21 @@ def build(state: str, year: int, raw: Path, out: Path) -> dict:
     if len(bad_wA):
         raise ValueError(f"non-positive farm labour earnings in {list(bad_wA)}; needs a documented rule")
     df["gateway"] = (df["fb_recent"] / df["workers_res"]) / (df["fb_recent"].sum() / df["workers_res"].sum())
-    df["kind"] = county_kinds(fips, df["HU_bea"].to_numpy(), read_metro_counties(files["cbsa"]))
+    metro = read_metro_counties(files["cbsa"])
+    df["kind"] = county_kinds(fips, df["HU_bea"].to_numpy(), {zone_of[f] for f in zone_of if f in metro})
 
-    # locations: population centres, projected (UTM 15N) for x/y
-    df["lat"], df["lon"] = cen.loc[fips, "lat"], cen.loc[fips, "lon"]
+    # locations: population centres (a merged zone: population-weighted mean of its counties)
+    w_cen = cen["cenpop"].reindex(list(zone_of)).astype(float)
+    for c in ("lat", "lon"):
+        df[c] = to_zones(cen[c].reindex(list(zone_of)), zone_of, w_cen).reindex(fips)
     nb_fips = neighbor_counties(shp, sf, st_geom)
-    pts = cen.loc[fips + nb_fips]
+    if not nb_fips:
+        raise ValueError(f"{state}: no out-of-state counties within {NEIGHBOR_BUFFER_M:g} m for the external zone")
+    pts = pd.concat([df[["lat", "lon"]], cen.loc[nb_fips, ["lat", "lon"]]])
     t_pts, d_road, n_calls = osrm_table(pts[["lon", "lat"]].to_numpy(), raw / "osrm")
     if np.isnan(t_pts).any():
-        raise RuntimeError("OSRM returned unroutable pairs")
+        i, j = np.argwhere(np.isnan(t_pts))[0]
+        raise RuntimeError(f"OSRM returned unroutable pairs, e.g. {pts.index[i]} -> {pts.index[j]}")
     d_line = haversine_km(pts["lat"].to_numpy()[:, None], pts["lon"].to_numpy()[:, None],
                           pts["lat"].to_numpy()[None, :], pts["lon"].to_numpy()[None, :])  # fmt: skip
     own_t, own_d, speed = own_trip(df["area_km2"].to_numpy(), t_pts, d_line, Z)
@@ -570,7 +743,8 @@ def build(state: str, year: int, raw: Path, out: Path) -> dict:
 
     from pyproj import Transformer
 
-    x, y = Transformer.from_crs(4326, 26915, always_xy=True).transform(df["lon"].to_numpy(), df["lat"].to_numpy())
+    crs = state_crs(zones)
+    x, y = Transformer.from_crs(4326, crs, always_xy=True).transform(df["lon"].to_numpy(), df["lat"].to_numpy())
     df["x_km"], df["y_km"] = x / 1e3, y / 1e3
 
     table = COUNTY_SCHEMA.validate(df.reset_index()[COLUMNS].astype({"fips": str, "name": str, "kind": str, "cash_rent_filled": bool}))
@@ -593,9 +767,14 @@ def build(state: str, year: int, raw: Path, out: Path) -> dict:
     meta = dict(state=state, year=year, sources=src, nass_file=nass_name, gaps=gaps, official=official,
                 neighbors=nb_fips, osrm_calls=n_calls, speed_km_per_min=speed, cdl_total_ha=cdl_total_ha,
                 scale=jobs["scale"], farm_wage=farm_wage, road_over_line=float(np.median(d_road[:Z, :Z][~np.eye(Z, dtype=bool)] / d_line[:Z, :Z][~np.eye(Z, dtype=bool)])),
-                raw=raw, built=dt.date.today().isoformat())  # fmt: skip
+                raw=raw, shared=shared, merged=merged, crs=crs, built=dt.date.today().isoformat())  # fmt: skip
     (out / "REPORT.md").write_text(report(table, t, meta))
     return dict(table=table, t=t, dist=dist, meta=meta)
+
+
+def state_crs(zones) -> int:
+    lon = zones.to_crs(4326).total_bounds[[0, 2]]
+    return utm_epsg(*lon)
 
 
 # --- report --------------------------------------------------------------------------------
@@ -618,15 +797,19 @@ def report(table: pd.DataFrame, t: np.ndarray, meta: dict) -> str:
           "`src/urqse/data/schema.py`) and `travel.npz` (`fips`, `t` minutes, `dist` km, rows in table order).", ""]
     L += ["## Sources", "", "| Item | Vintage | File (data_raw) | Retrieved | URL |", "|---|---|---|---|---|"]
     for s in meta["sources"].values():
-        p = raw / s.file
+        p = source_path(s, raw, meta["shared"])
         got = dt.date.fromtimestamp(p.stat().st_mtime).isoformat() if p.exists() else "missing"
-        L.append(f"| {s.name} | {s.vintage} | `{s.file}` | {got} | {s.url} |")
+        where = "US/" if s.shared else f"{meta['state']}/"
+        L.append(f"| {s.name} | {s.vintage} | `{where}{s.file}` | {got} | {s.url} |")
     L.append(f"| nass | Quick Stats bulk economics file `{meta['nass_file']}` (Census of Agriculture 2022; "
              f"Cash Rents Survey {meta['year']}) | `{meta['nass_file']}` (filtered copy `*_{meta['state']}.tsv.gz`) | "
              f"see file | {NASS_BASE}{meta['nass_file']} |")
     L.append(f"| osrm | OSRM public demo server, car profile (OSM data as served on the build date) | `osrm/*.json` "
              f"({meta['osrm_calls']} cached block requests; the server caps a table at {OSRM_MAX_COORDS} coordinates) | "
              f"{meta['built']} | {OSRM} |")
+    if meta["merged"]:
+        L += ["", "BEA combination areas are single zones here (every source is summed to them): " + "; ".join(
+            f"{z} {table.set_index('fips').loc[z, 'name']} = {', '.join(m)}" for z, m in sorted(meta["merged"].items())) + "."]
     L += ["", "## County sums against published state totals", "",
           "| Column | Sum of counties | Published state value | Difference |", "|---|---|---|---|"]
     for col, label in (("pop", "PEP population"), ("workers_res", "ACS workers by residence"),
@@ -713,14 +896,16 @@ def report(table: pd.DataFrame, t: np.ndarray, meta: dict) -> str:
         L += [f"| {g['var']} | {g['fips']} {name.get(g['fips'], '')} | {g['rule']} |" for g in meta["gaps"]]
     else:
         L.append("None.")
-    L += ["", f"No BEA (D) cells for this state and year: CAEMP25N L50/70/80, CAINC45 L350/360/370 and CAINC5N L82 are published "
-          f"for every county ({fw['years'][0]} to {fw['years'][1]} for the farm-wage lines). Census of Agriculture tenure and value cells are all published.", "",
-          "## Coverage gaps and caveats", "",
+    if not any(g["var"].endswith("_bea") or g["var"].endswith("earn_usd") or g["var"] == "farm_comp_per_ws_job" for g in meta["gaps"]):
+        L += ["", f"No BEA (D) cells for this state and year: CAEMP25N L50/70/80, CAINC45 L350/360/370 and CAINC5N L82 are published "
+              f"for every county ({fw['years'][0]} to {fw['years'][1]} for the farm-wage lines)."]
+    L += ["", "## Coverage gaps and caveats", "",
           "- ACS is the 5-year period estimate ending in the base year (no 1-year data for small counties); BEA and PEP are "
           "single-year. The external zone inherits ACS sampling error in the commuter totals.",
           "- The Census API now requires a key, so ACS comes from the table-based summary files instead (same estimates).",
           "- LODES (for the M3 PPML of kappa*lambda) and IRS SOI migration flows are not part of this build.",
-          "- Census of Agriculture is quinquennial (2022 matches the base year); the cash-rent survey is annual for Iowa.",
+          "- Census of Agriculture is quinquennial (2022 matches the base year); the cash-rent survey is annual.",
+          f"- x_km / y_km are NAD83 / UTM (EPSG:{meta['crs']}) at the state's middle longitude, for drawing only.",
           "- No satellite population layer (GHS-POP) is used; census counts drive calibration (spec §8).", ""]
     L += ["## County table", "",
           "| FIPS | Name | Kind | N | HU | HA | TF ha | L m^2 | wA $/worker | BEA farm earnings $/job | omega | rent $/ac |",
@@ -742,7 +927,9 @@ def main(argv=None):
     a = ap.parse_args(argv)
     state = a.state.upper()
     if state not in STATE_FIPS:
-        sys.exit(f"no source configuration for {state}; add it to STATE_FIPS / GHSL_TILES")
+        sys.exit(f"unknown state {state!r}; use a postal code in STATES")
+    if state in UNSUPPORTED:
+        sys.exit(f"{state} is not built: {UNSUPPORTED[state]}")
     res = build(state, a.year, a.raw or ROOT / "data_raw" / state, a.out or state_dir(state, a.year))
     tb = res["table"]
     if a.out is None:  # data/ is git-ignored; keep a tracked copy of the report

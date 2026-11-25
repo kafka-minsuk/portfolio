@@ -57,6 +57,25 @@ const REGION_TEXT = {
   synthetic: { sub: "synthetic 25-county state", help: "A made-up state with known answers: one core city, 8 suburbs, 16 rural counties." },
   IA_2022: { sub: "Iowa 2022, 99 counties", help: "Real county data. The core is Polk County (Des Moines); suburbs are the other metro-area counties." },
 };
+const REPORTS = "https://github.com/kafka-minsuk/portfolio/blob/main/reports";
+
+// The built states (migration/data/regions.json, written by urqse.data.export_web) fill the menu.
+async function loadRegions() {
+  let regions = [];
+  try {
+    const res = await fetch("migration/data/regions.json");
+    if (res.ok) regions = (await res.json()).regions;
+  } catch { /* keep the built-in entries */ }
+  for (const r of regions) {
+    const core = r.core_label.includes("(") ? r.core_label : `${r.core_label} County`;
+    REGION_TEXT[r.id] ??= { sub: `${r.label}, ${r.counties} counties`,
+      help: `Real county data. The core is ${core}; ${r.suburbs} suburbs are the other metro-area counties, ${r.rural} are rural.` };
+  }
+  const opt = (id, text) => `<option value="${id}">${esc(text)}</option>`;
+  const states = regions.length ? regions : [{ id: "IA_2022", label: "Iowa 2022", counties: 99 }];
+  $("region").innerHTML = opt("synthetic", "Synthetic 25-county state")
+    + `<optgroup label="U.S. states (${states.length})">${states.map(r => opt(r.id, `${r.label} · ${r.counties} counties`)).join("")}</optgroup>`;
+}
 const isReal = r => !!r.region;  // a real region's result carries region, levels and real units
 
 // The map polygons come from the same region document the worker reads (shape in urqse.api).
@@ -507,8 +526,14 @@ function drawDiagnostics(r, dx) {
       ${row("Gap", isFinite(gap) ? gap.toFixed(2) + "%" : "—", isFinite(gap) ? gap < 0.2 : null)}</div>`;
   }
   $("diag").innerHTML = html;
-  $("iowaCaveats").hidden = !(isReal(r) && r.region.id === "IA_2022");
-  if (isReal(r)) $("usdUnit").textContent = usd(r.region.usd_per_wage_unit);
+  const iowa = isReal(r) && r.region.id === "IA_2022";
+  $("iowaCaveats").hidden = !iowa;
+  $("stateCaveats").hidden = !isReal(r) || iowa;
+  if (isReal(r)) {
+    for (const el of document.querySelectorAll(".usdUnit")) el.textContent = usd(r.region.usd_per_wage_unit);
+    const id = r.region.id;
+    $("stateReports").innerHTML = `<a href="${REPORTS}/${id}_CALIBRATION.md">calibration report</a> · <a href="${REPORTS}/${id}_REPORT.md">county data report</a>`;
+  }
 }
 
 // ------------------------------------------------------------------ view state
@@ -572,6 +597,7 @@ function wireView() {
 }
 
 async function main() {
+  await loadRegions();
   $("region").disabled = FIXTURE;
   buildControls();
   syncControls();

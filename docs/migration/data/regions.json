@@ -1,0 +1,28 @@
+{
+ "regions": [
+  {
+   "id": "AR_2022",
+   "label": "Arkansas 2022",
+   "counties": 75,
+   "core_label": "Pulaski",
+   "suburbs": 16,
+   "rural": 58
+  },
+  {
+   "id": "IA_2022",
+   "label": "Iowa 2022",
+   "counties": 99,
+   "core_label": "Polk (Des Moines)",
+   "suburbs": 21,
+   "rural": 77
+  },
+  {
+   "id": "NE_2022",
+   "label": "Nebraska 2022",
+   "counties": 93,
+   "core_label": "Douglas",
+   "suburbs": 10,
+   "rural": 82
+  }
+ ]
+}

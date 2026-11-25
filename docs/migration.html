@@ -32,7 +32,7 @@
         <select id="region">
           <option value="synthetic">Synthetic 25-county state</option>
           <option value="IA_2022">Iowa 2022 · 99 counties</option>
-        </select>
+        </select><!-- the full list comes from migration/data/regions.json -->
         <div class="help" id="regionHelp"></div>
       </div>
       <div id="shockCtl"></div>
@@ -129,9 +129,18 @@
             <li><b>Farmland rents fail the cash-rent check in sign.</b> Model rents match the NASS level on average but are higher where NASS rents are lower (correlation −0.44 across counties), because farm jobs per hectare are highest in southern Iowa's livestock and pasture counties.</li>
             <li><b>The commuting slope depends on the sample.</b> κλ = 0.021 per minute fits all in-state county pairs. On trips under 60 to 90 minutes it is about 0.05, close to the 0.08 default. Travel-time shocks are sensitive to this choice.</li>
             <li><b>The farm wage is labour earnings only</b> (hired-labour compensation per job, applied to proprietors too). Proprietor labour and the BEA vs Census of Agriculture hired-labour gap are open <code>VERIFY</code> items.</li>
-            <li>Dollar figures use one model wage unit = <span id="usdUnit"></span> (state non-farm earnings per non-farm worker, 2022).</li>
+            <li>Dollar figures use one model wage unit = <span class="usdUnit"></span> (state non-farm earnings per non-farm worker, 2022).</li>
           </ul>
           <p class="muted small">Details: <a href="https://github.com/kafka-minsuk/portfolio/blob/main/reports/IA_2022_CALIBRATION.md">calibration report</a> · <a href="https://github.com/kafka-minsuk/portfolio/blob/main/reports/IA_2022_REPORT.md">county data report</a></p>
+        </div>
+        <div class="caveats prose" id="stateCaveats" hidden>
+          <h3>State calibration: read with care</h3>
+          <ul>
+            <li>Built and calibrated by the same pipeline as Iowa, with this state's own κλ (LODES commuting) and θ_T (cash rents). Only Iowa's results have been read through by hand; the Iowa caveats about the cash-rent check and the commuting slope may apply here too.</li>
+            <li>One core county (the metro county with the most non-farm jobs). In a state with several large metros the others count as suburbs.</li>
+            <li>Dollar figures use one model wage unit = <span class="usdUnit"></span> (state non-farm earnings per non-farm worker, 2022).</li>
+          </ul>
+          <p class="muted small">Details: <span id="stateReports"></span> · <a href="https://github.com/kafka-minsuk/portfolio/blob/main/reports/STATES_STATUS.md">which states are built</a></p>
         </div>
       </section>
 
@@ -143,7 +152,7 @@
           <p><b>A semi-closed region.</b> The parameter η sets how open the region is to the rest of the country. In this version η = 0: nobody moves in from elsewhere in the country, so a growing city fills from its own countryside. International immigration is an optional, exogenous number of arrivals per period, who settle by the same rules as residents.</p>
           <p><b>When the path stops.</b> The countryside “has enough people for the land” when farmland per farm worker in rural counties has risen by the consolidation target ε (for example 10%). The path stops at that period, at a steady state, or at the horizon, whichever comes first.</p>
           <p><b>Land.</b> Farmland is partly worked by owner-operators and partly rented from landlords. Land income is wealth: a farmer who moves keeps it, so by default it does not hold people in place. Farmland and urban land are priced as the present value of the rents the model produces, which is how the page reports wealth changes for farmers who stay and farmers who leave.</p>
-          <p><b>Regions.</b> The synthetic 25-county state has known answers, so every result can be checked. Iowa 2022 uses real county data (99 counties, Polk County as the core) and Iowa estimates of the land share in farming θ_T and the commuting slope κλ. Iowa also has an external zone for the out-of-state homes and jobs of commuters. It is part of the model and of the region totals, but it is not drawn on the map and not counted as rural.</p>
+          <p><b>Regions.</b> The synthetic 25-county state has known answers, so every result can be checked. The U.S. states use real 2022 county data and each state's own estimates of the land share in farming θ_T and the commuting slope κλ (Iowa, 99 counties with Polk County as the core, is the one checked by hand). Some states are not offered: their counties do not all have farm jobs, or their county geographies disagree across sources. Every state also has an external zone for the out-of-state homes and jobs of commuters. It is part of the model and of the region totals, but it is not drawn on the map and not counted as rural.</p>
           <p class="muted">The model is solved in your browser with Python (Pyodide); the page only draws what the solver returns, and hides results whenever the solver fails to converge.</p>
         </div>
       </section>

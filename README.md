@@ -40,15 +40,21 @@ python3 -m http.server -d docs 8000   # then open http://localhost:8000
 ## Urban–rural migration simulator (`docs/migration.html`)
 
 The URQSE model (`src/urqse`, spec in `URQSE_model_spec.md`) runs in the browser under Pyodide.
-Two regions: a synthetic 25-county state and Iowa 2022 (99 counties, Polk as the core).
-After changing the model or the Iowa data, rebuild the two web inputs:
+Regions: a synthetic 25-county state and every U.S. state the 2022 sources can build, one state at a
+time (`reports/STATES_STATUS.md` lists which, and why the others are left out: Alaska, Hawaii,
+Connecticut, DC, and the states with a county that has no farm jobs). Iowa 2022 (99 counties, Polk as
+the core) is the one checked by hand. Rebuild one state, or all of them:
 
 ```bash
-python -m urqse.calibrate.run_state IA 2022   # Iowa estimates (needs data/IA/2022 from urqse.data.build_state)
-python -m urqse.data.export_web IA 2022       # docs/migration/data/IA_2022.json (county data, params, map)
+python -m urqse.data.build_state NE 2022      # data/NE/2022 (downloads cached in data_raw/US and data_raw/NE)
+python -m urqse.calibrate.run_state NE 2022   # estimates, calibration report
+python -m urqse.data.export_web NE 2022       # docs/migration/data/NE_2022.json + regions.json (the page's menu)
+python scripts/build_all_states.py 2022       # all of the above for every supported state; hours on a first run
 python scripts/build_py_bundle.py             # docs/py/urqse.zip
 ```
 
+National downloads (Census, BEA, NASS, GHSL tiles, LODES) are shared in `data_raw/US/`; each state
+adds its Cropland Data Layer raster (0.2 to 2 GB) and its OSRM travel-time requests.
 The region file's shape is documented in `src/urqse/api.py`. The exporter needs the `data` extras
 (pandas, geopandas); the browser bundle needs only NumPy.
 

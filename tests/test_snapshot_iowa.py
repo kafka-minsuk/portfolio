@@ -17,9 +17,8 @@ from urqse.model.params import Params  # noqa: E402
 ROOT = Path(__file__).resolve().parents[1]
 SNAPSHOT = json.loads((ROOT / "tests" / "snapshots" / "IA_2022.json").read_text())
 RAW = ROOT / "data_raw" / "IA"
-LODES = [RAW / "lodes" / f"{s}_od_{p}_JT00_2022.csv.gz" for s, p in [("ia", "main"), ("ia", "aux")]] + [
-    RAW / "lodes" / f"{s}_od_aux_JT00_2022.csv.gz" for s in rs.NEIGHBOR_STATES["IA"]
-]
+IA_NEIGHBOR_COUNTIES = ["17", "27", "29", "31", "46", "55"]  # IL MN MO NE SD WI: one county each is enough
+LODES = rs.lodes_paths("IA", 2022, [f + "001" for f in IA_NEIGHBOR_COUNTIES], download=False)
 HAVE_DATA = (state_dir("IA", 2022) / COUNTY_FILE).exists() and all(p.exists() for p in LODES)
 
 

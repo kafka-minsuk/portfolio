@@ -3,7 +3,8 @@
     python -m urqse.calibrate.run_state IA 2022 [--snapshot]
 
 Reads data/{state}/{year}/ (built by urqse.data.build_state) and LODES OD files (downloaded once
-into data_raw/{state}/lodes/). Writes data/{state}/{year}/calibrated.npz (git-ignored), the
+into data_raw/US/lodes/: the state's main and aux files and the aux files of the states that hold
+the external zone's counties). Writes data/{state}/{year}/calibrated.npz (git-ignored), the
 tracked state estimates (calibrate/estimates/{state}_{year}.json), reports/{state}_{year}_CALIBRATION.md
 and its xi_A map; --snapshot also rewrites the pinned numbers in tests/snapshots/."""
 
@@ -27,7 +28,6 @@ ROOT = Path(__file__).resolve().parents[3]
 ESTIMATES_DIR = Path(__file__).resolve().parent / "estimates"
 SNAPSHOT_DIR = ROOT / "tests" / "snapshots"
 LODES_URL = "https://lehd.ces.census.gov/data/lodes/LODES8/{st}/od/{st}_od_{part}_JT00_{year}.csv.gz"
-NEIGHBOR_STATES = {"IA": ("il", "mn", "mo", "ne", "sd", "wi")}
 EARN_YEARS = 5  # multi-year mean of BEA farm earnings for the M3 theta_T comparison row
 
 
@@ -48,21 +48,27 @@ def state_params(state: str, year: int, **overrides) -> Params:
 # --- LODES ---------------------------------------------------------------------------------
 
 
-def lodes_paths(state: str, year: int, raw: Path) -> list:
+def neighbor_states(ext_counties) -> tuple:
+    """Postal codes (lower case) of the states that hold the external zone's counties."""
+    return tuple(sorted({bs.FIPS_STATE[f[:2]].lower() for f in ext_counties}))
+
+
+def lodes_paths(state: str, year: int, ext_counties, shared: Path = bs.SHARED_RAW, download: bool = True) -> list:
     st = state.lower()
-    parts = [(st, "main"), (st, "aux")] + [(nb, "aux") for nb in NEIGHBOR_STATES[state]]
-    return [
-        bs.curl(LODES_URL.format(st=s, part=part, year=year), raw / "lodes" / f"{s}_od_{part}_JT00_{year}.csv.gz")
-        for s, part in parts
-    ]
+    parts = [(st, "main"), (st, "aux")] + [(nb, "aux") for nb in neighbor_states(ext_counties)]
+    paths = [(LODES_URL.format(st=s, part=part, year=year), shared / "lodes" / f"{s}_od_{part}_JT00_{year}.csv.gz")
+             for s, part in parts]  # fmt: skip
+    return [bs.curl(url, path) if download else path for url, path in paths]
 
 
-def county_flows(paths, fips, ext_counties) -> np.ndarray:
+def county_flows(paths, fips, ext_counties, zone_of=None) -> np.ndarray:
     """LODES JT00 block OD (S000 = all jobs) summed to residence x workplace zones. In-state
-    counties keep their index; the out-of-state counties of the external zone map to the last
-    index; every other block pair is dropped. Rows = residence (h), columns = workplace (w)."""
+    counties keep their zone's index (`zone_of` maps a county to a merged BEA zone); the out-of-state
+    counties of the external zone map to the last index; every other block pair is dropped.
+    Rows = residence (h), columns = workplace (w)."""
     Z = len(fips) + 1
-    zone = {f: k for k, f in enumerate(fips)} | {f: Z - 1 for f in ext_counties}
+    index = {f: k for k, f in enumerate(fips)}
+    zone = {c: index[z] for c, z in (zone_of or {}).items() if z in index} | index | {f: Z - 1 for f in ext_counties}
     flows = np.zeros((Z, Z))
     for path in paths:
         od = pd.read_csv(path, usecols=["w_geocode", "h_geocode", "S000"], dtype={"w_geocode": str, "h_geocode": str})
@@ -160,7 +166,7 @@ def overid_runs(cal0, cal, p0, p, counties, cdf, usd, pub) -> dict:
     return out
 
 
-def run(state: str, year: int, raw: Path, ddir: Path) -> dict:
+def run(state: str, year: int, raw: Path, ddir: Path, shared: Path = bs.SHARED_RAW) -> dict:
     df = read_county(ddir / COUNTY_FILE)
     fips_all, t, dist = read_travel(ddir / TRAVEL_FILE)
     data = to_county_data(df, fips_all, t, dist)
@@ -169,13 +175,14 @@ def run(state: str, year: int, raw: Path, ddir: Path) -> dict:
     fips = cdf["fips"].tolist()
     usd = usd_per_wage_unit(df)  # $ per model wage unit (non-farm earnings per non-farm worker)
 
-    files = {k: bs.fetch(v, raw) for k, v in bs.sources(state, year).items() if k in ("counties", "bea_farm")}
+    files = {k: bs.fetch(v, raw, shared) for k, v in bs.sources(state, year).items() if k in ("counties", "bea_farm", "bea_emp")}
     shp = bs.read_counties(files["counties"])
     sf = bs.STATE_FIPS[state]
-    ext_counties = bs.neighbor_counties(shp, sf, shp.loc[fips].to_crs(5070).union_all())
+    zones, zone_of = bs.state_zones(shp, files["bea_emp"], state)
+    ext_counties = bs.neighbor_counties(shp, sf, zones.loc[fips].to_crs(5070).union_all())
 
     # 4. kappa*lam by PPML on LODES
-    flows = county_flows(lodes_paths(state, year, raw), fips, ext_counties)
+    flows = county_flows(lodes_paths(state, year, ext_counties, shared), fips, ext_counties, zone_of)
     gravity = gravity_specs(flows, t)
     kl = gravity[HEADLINE_GRAVITY]
 
@@ -199,27 +206,30 @@ def run(state: str, year: int, raw: Path, ddir: Path) -> dict:
     E = cdf["farm_earn_usd"].to_numpy(float)
     accounts = farm_income_accounts(cal, data, counties, usd, E)
 
-    # M3 for comparison: wA_obs = BEA farm earnings per BEA job, wage unit per BEA non-farm job
+    # M3 for comparison: wA_obs = BEA farm earnings per BEA job, wage unit per BEA non-farm job.
+    # Skipped where a county's BEA farm earnings are not positive (they are net of expenses).
     usd_m3 = float(cdf["nonfarm_earn_usd"].sum() / cdf["HU_bea"].sum())
     wA_m3 = df["wA_bea_earn_usd"].to_numpy(float).copy()
     wA_m3[~counties] = E.sum() / cdf["HA_bea"].sum()
-    data_m3 = replace(data, wA_obs=wA_m3 / usd_m3)
-    p_m3 = Params(kappa_lam=kl.kappa_lam, theta_T=theta[M3_THETA]["state"])
-    cal0_m3, cal_m3 = calibrate(data_m3, p0), calibrate(data_m3, p_m3)
-    scale = (cdf["HA"] / cdf["HA_bea"]).to_numpy(float)
-    overid_m3 = overid_runs(cal0_m3, cal_m3, p0, p_m3, counties, cdf, usd_m3, pub)
-    m3 = dict(
-        data=data_m3, p=p_m3, cal0=cal0_m3, cal=cal_m3, overid=overid_m3, usd=usd_m3, scale=scale,
-        accounts=farm_income_accounts(cal_m3, data_m3, counties, usd_m3, E),
-        unscaled_ratio=float(np.sum((overid_m3["theta_T = 0.40 (default)"]["model"] / scale * TF)[pub])
-                             / np.sum((obs * TF)[pub])),
-    )  # fmt: skip
+    m3 = None
+    if np.all(wA_m3 > 0) and 0.0 < theta[M3_THETA]["state"] < 1.0:
+        data_m3 = replace(data, wA_obs=wA_m3 / usd_m3)
+        p_m3 = Params(kappa_lam=kl.kappa_lam, theta_T=theta[M3_THETA]["state"])
+        cal0_m3, cal_m3 = calibrate(data_m3, p0), calibrate(data_m3, p_m3)
+        scale = (cdf["HA"] / cdf["HA_bea"]).to_numpy(float)
+        overid_m3 = overid_runs(cal0_m3, cal_m3, p0, p_m3, counties, cdf, usd_m3, pub)
+        m3 = dict(
+            data=data_m3, p=p_m3, cal0=cal0_m3, cal=cal_m3, overid=overid_m3, usd=usd_m3, scale=scale,
+            accounts=farm_income_accounts(cal_m3, data_m3, counties, usd_m3, E),
+            unscaled_ratio=float(np.sum((overid_m3["theta_T = 0.40 (default)"]["model"] / scale * TF)[pub])
+                                 / np.sum((obs * TF)[pub])),
+        )  # fmt: skip
 
     return dict(
-        state=state, year=year, df=df, cdf=cdf, data=data, usd=usd, counties=counties, shp=shp, fips=fips,
+        state=state, year=year, df=df, cdf=cdf, data=data, usd=usd, counties=counties, shp=zones, fips=fips,
         flows=flows, gravity=gravity, theta=theta, theta_hat=theta_hat, earn_years=earn_years,
         p0=p0, p_state=p_state, cal0=cal0, cal=cal, overid=overid, pub=pub, m3=m3, accounts=accounts,
-        corr_log_farmland=corr_log_farmland, ext_counties=ext_counties,
+        corr_log_farmland=corr_log_farmland, ext_counties=ext_counties, neighbor_states=neighbor_states(ext_counties),
         earn_2022_over_mean=float(cdf["farm_earn_usd"].sum() / earn_mean.sum()),
     )  # fmt: skip
 

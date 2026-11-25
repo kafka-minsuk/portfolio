@@ -88,6 +88,28 @@ def _active(flows, mask):
         mask = new
 
 
+def _identified(oi, dj) -> np.ndarray:
+    """Destination dummies to keep: all but the first destination of each connected component of the
+    origin-destination graph of the sample pairs. A short-trip sample can split a state into groups
+    of counties with no pair between them; each group's fixed effects then need their own
+    normalisation (one group, as with all pairs, drops destination 0 only)."""
+    no, nd = oi.max() + 1, dj.max() + 1
+    label = np.arange(no + nd)  # min-label propagation over the pairs until stable
+    while True:
+        m = np.minimum(label[oi], label[no + dj])
+        new = label.copy()
+        np.minimum.at(new, oi, m)
+        np.minimum.at(new, no + dj, m)
+        new = new[new]
+        if (new == label).all():
+            break
+        label = new
+    dest = label[no:]
+    keep = np.ones(nd, bool)
+    keep[[int(np.flatnonzero(dest == c)[0]) for c in np.unique(dest)]] = False
+    return keep
+
+
 def commuting_gravity(flows, t, mask=None, **kw) -> GravityFit:
     """flows[i, j] = workers living in i and working in j; t in minutes; mask selects the pairs
     used (default: all). Returns kappa*lam, the semi-elasticity per minute."""
@@ -97,7 +119,8 @@ def commuting_gravity(flows, t, mask=None, **kw) -> GravityFit:
     i, j = np.nonzero(mask)
     oi = np.unique(i, return_inverse=True)[1]
     dj = np.unique(j, return_inverse=True)[1]
-    X = np.column_stack([-t[i, j], np.eye(oi.max() + 1)[oi], np.eye(dj.max() + 1)[dj][:, 1:]])
+    D = np.eye(dj.max() + 1)[dj]
+    X = np.column_stack([-t[i, j], np.eye(oi.max() + 1)[oi], D[:, _identified(oi, dj)]])
     y = flows[i, j]
     fit = ppml(y, X, cluster=i, **kw)
     r2 = float(np.corrcoef(y, fit.mu)[0, 1] ** 2)
