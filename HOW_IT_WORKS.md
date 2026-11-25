@@ -67,4 +67,6 @@ These are deliberate simplifications. Each is a known limit, not an oversight.
 
 ## What is in the browser
 
+The **Presets** buttons set common scenarios in one click. City presets change the core: a downtown boom or decline, upzoning, a metro transit line, or better city amenities. State presets act everywhere: a farm technology leap or downturn, a highway programme, an immigration wave, or rural revival. A preset sets every shock and keeps the parameters, so you can compare presets under the same assumptions.
+
 `docs/migration/data/regions.json` lists the states that are built. Alaska, Hawaii, Connecticut, and DC are not built, and `reports/STATES_STATUS.md` gives the reason for each. Each state has two reports. `reports/{state}_2022_REPORT.md` covers the data build. `reports/{state}_2022_CALIBRATION.md` covers the estimates and checks. Only Iowa's reports have been read through by hand.
