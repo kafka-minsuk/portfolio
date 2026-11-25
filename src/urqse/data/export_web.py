@@ -17,7 +17,7 @@ import shapely
 
 from ..api import REGION_FORMAT
 from ..calibrate.run_state import state_estimates
-from .build_state import STATE_NAME, read_counties, sources, state_crs, state_zones
+from .build_state import STATE_NAME, read_counties, read_metro_areas, sources, state_crs, state_zones
 from .loaders import (
     COUNTY_FILE, METRO_FILE, METRO_TRAVEL_FILE, TRAVEL_FILE, read_county, read_metro, read_travel, state_dir,
     to_county_data, usd_per_wage_unit,
@@ -59,7 +59,7 @@ def region_document(state: str, year: int) -> dict:
     data = to_county_data(df, fips, t, dist)
     src = sources(state, year)
     shared = ROOT / "data_raw" / "US"
-    shp, _ = state_zones(read_counties(shared / src["counties"].file), shared / src["bea_emp"].file, state)
+    shp, zone_of = state_zones(read_counties(shared / src["counties"].file), shared / src["bea_emp"].file, state)
     crs = state_crs(shp)
     est = state_estimates(state, year)
     doc = {
@@ -79,21 +79,51 @@ def region_document(state: str, year: int) -> dict:
         "dist_km": np.round(dist, 2).tolist(),
         "geometry": county_polygons(shp, fips, crs),
     }
+    parent = df["parent"].tolist() if metro else list(fips)
+    nest, metro_core, doc["metros"] = metro_nests(county_df, parent, read_metro_areas(shared / src["cbsa"].file), zone_of)
+    doc["counties"] |= {"nest": nest, "metro_core": metro_core}
     if not metro:
         return doc
-    # metro nest: zones are counties + tracts; the state map draws the county view
+    # tracts in the core's metro: zones are counties + tracts; the state map draws the county view
     parents = list(dict.fromkeys(df["parent"]))
     cv = county_df.set_index("fips").loc[parents]
-    doc["counties"] |= {"nest": df["nest"].tolist(), "parent": df["parent"].tolist()}
+    doc["counties"] |= {"parent": df["parent"].tolist()}
     doc["county_view"] = {"fips": parents, "name": cv["name"].tolist(), "kind": cv["kind"].tolist(),
                           "x_km": cv["x_km"].tolist(), "y_km": cv["y_km"].tolist()}  # fmt: skip
     doc["geometry"] = county_polygons(shp, parents, crs)
-    sf = df.loc[df["nest"] == 0, "fips"].iloc[0][:2]
+    inside = df["fips"].str.len().to_numpy() == 11  # tracts
+    sf = df.loc[inside, "fips"].iloc[0][:2]
     tracts = read_counties(ROOT / "data_raw" / state / "tract" / f"cb_2022_{sf}_tract_500k.zip")
-    inside = df["nest"].to_numpy() == 0
+    doc["metros"][0]["tracts"] = int(inside.sum())
     doc["city"] = {"geometry": county_polygons(tracts, list(np.asarray(fips)[inside]), crs, simplify_m=SIMPLIFY_TRACT_M),
                    "label": f"{CORE_LABEL.get(state, data.names[data.core])} metro area"}  # fmt: skip
     return doc
+
+
+def metro_nests(county_df, parent: list, areas: dict, zone_of: dict):
+    """Each Metropolitan Statistical Area (its in-state counties) is a nest (spec §3.12). Metro 0 holds
+    the state's core; the others follow by resident workers. A metro's core is its county with the
+    most non-farm jobs. Returns (nest label per zone, metro-core flag per zone, metro list)."""
+    c = county_df[county_df["kind"] != "external"].set_index("fips")
+    groups: dict = {}
+    for county, (code, title) in areas.items():
+        z = zone_of.get(county)
+        if z in c.index:
+            groups.setdefault(code, (title, set()))[1].add(z)
+    main = c.index[c["kind"] == "core"][0]
+    order = sorted(groups, key=lambda g: (main not in groups[g][1], -c.loc[sorted(groups[g][1]), "N"].sum()))
+    metro_of, core_of, metros = {}, {}, []
+    for k, g in enumerate(order):
+        title, members = groups[g]
+        members = sorted(members)
+        core = main if main in members else c.loc[members, "HU"].idxmax()
+        metro_of |= dict.fromkeys(members, k)
+        core_of[k] = core
+        metros.append({"id": k, "cbsa": g, "name": title.rsplit(",", 1)[0], "core": c.loc[core, "name"],
+                       "counties": len(members), "tracts": 0})  # fmt: skip
+    nest = [metro_of.get(p, -1) for p in parent]
+    metro_core = [n >= 0 and p == core_of[n] for p, n in zip(parent, nest)]
+    return nest, metro_core, metros
 
 
 def index_entry(doc: dict) -> dict:
@@ -101,8 +131,9 @@ def index_entry(doc: dict) -> dict:
     n = sum(k != "external" for k in kind)
     entry = {"id": doc["region"], "label": doc["label"], "counties": n, "core_label": doc["core_label"],
              "suburbs": sum(k == "suburb" for k in kind), "rural": sum(k == "rural" for k in kind)}  # fmt: skip
+    entry["metros"] = len(doc.get("metros", []))
     if "city" in doc:
-        entry["tracts"] = sum(v == 0 for v in doc["counties"]["nest"])
+        entry["tracts"] = len(doc["city"]["geometry"])
     return entry
 
 

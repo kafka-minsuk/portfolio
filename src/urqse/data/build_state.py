@@ -251,6 +251,14 @@ def read_metro_counties(path: Path) -> set:
     return set(rows["STCOU"].str.zfill(5))  # the file drops the leading zero of state FIPS 01-09
 
 
+def read_metro_areas(path: Path) -> dict:
+    """County FIPS -> (CBSA code, title) for every county in a Metropolitan Statistical Area."""
+    df = pd.read_csv(path, encoding="latin-1", dtype=str)
+    titles = df.loc[df["LSAD"] == "Metropolitan Statistical Area"].set_index("CBSA")["NAME"]
+    rows = df[(df["LSAD"] == "County or equivalent") & df["CBSA"].isin(titles.index)]
+    return {f.zfill(5): (c, titles[c]) for f, c in zip(rows["STCOU"], rows["CBSA"])}
+
+
 def read_cenpop(path: Path) -> pd.DataFrame:
     df = pd.read_csv(path, encoding="utf-8-sig", dtype={"STATEFP": str, "COUNTYFP": str})
     df.index = df["STATEFP"] + df["COUNTYFP"]

@@ -15,7 +15,7 @@ const DEFAULT_SCENARIO = {
             price_rent_ratio: 36.0, epsilon: 0.10, varsigma: 0.5, land_income_in_choice: false, lam_M_over_R: 1.0 },
   shocks: { core_productivity_pct: 10.0, farm_tfp_pct: 0.0, travel_cut_pct: 0.0, travel_cut_scope: "into_core",
             immigration_per_period: 0.0, periods: 60, core_floor_supply_pct: 0.0, core_amenity_pct: 0.0,
-            metro_travel_cut_pct: 0.0, rural_amenity_pct: 0.0 },
+            metro_travel_cut_pct: 0.0, rural_amenity_pct: 0.0, metro_target: "main" },
 };
 
 // Presets: named scenarios that shake the equilibrium from the city side or across the state.
@@ -81,6 +81,8 @@ const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;",
 // ------------------------------------------------------------------ controls (one table drives the form)
 const SHOCK_CTL = [
   { head: "City" },
+  { key: "metro_target", label: "Where the city shocks land", select: true, fmt: () => "",
+    help: "The core of the main metro, of every metro, or of one metro you pick." },
   { key: "core_productivity_pct", label: "Core productivity shock", min: -20, max: 30, step: 1, fmt: v => pct(v, 0), help: "Non-farm productivity in the core city." },
   { key: "core_floor_supply_pct", label: "Core floor space (upzoning)", min: -30, max: 100, step: 5, fmt: v => pct(v, 0), help: "Floor space the core supplies at any rent." },
   { key: "core_amenity_pct", label: "Core amenities", min: -20, max: 30, step: 1, fmt: v => pct(v, 0), help: "How attractive the core is as a place to live." },
@@ -108,7 +110,7 @@ const PARAM_CTL = [
   { key: "land_income_in_choice", label: "Land income affects where people live", check: true, help: "Off by default: land income is portable wealth." },
 ];
 
-const S = { scenario: structuredClone(DEFAULT_SCENARIO), result: null, view: "long", metric: "dN_pct", period: 0, autoRun: false, geo: {}, shapes: {}, cityShapes: {}, zoom: "state", preset: null };
+const S = { scenario: structuredClone(DEFAULT_SCENARIO), result: null, view: "long", metric: "dN_pct", period: 0, autoRun: false, geo: {}, shapes: {}, cityShapes: {}, zoom: "state", preset: null, metros: {} };
 
 // ------------------------------------------------------------------ regions
 const REGION_TEXT = {
@@ -144,7 +146,11 @@ function loadGeo(region) {
   return S.geo[region] ??= fetch(`migration/data/${region}.json`, { cache: "no-cache" }).then(res => {
     if (!res.ok) throw new Error(`Region data migration/data/${region}.json not found (HTTP ${res.status}).`);
     return res.json();
-  }).then(doc => { S.cityShapes[region] = doc.city ? doc.city.geometry : null; return (S.shapes[region] = doc.geometry); })
+  }).then(doc => {
+    S.cityShapes[region] = doc.city ? doc.city.geometry : null;
+    S.metros[region] = doc.metros || [];
+    return (S.shapes[region] = doc.geometry);
+  })
     .catch(err => { delete S.geo[region]; throw err; });
 }
 
@@ -174,6 +180,8 @@ async function setRegion(region) {
 
 function controlHTML(c, group) {
   if (c.head) return `<h3 class="ctl-head">${c.head}</h3>`;
+  if (c.select) return `<div class="ctl"><div class="top"><label for="${group}-${c.key}">${c.label}</label></div>`
+    + `<select id="${group}-${c.key}" data-group="${group}" data-key="${c.key}"></select>${c.help ? `<div class="help">${c.help}</div>` : ""}</div>`;
   const id = `${group}-${c.key}`;
   if (c.check) return `<div class="ctl check"><label><input type="checkbox" id="${id}" data-group="${group}" data-key="${c.key}"> <span>${c.label}${c.help ? `<div class="help">${c.help}</div>` : ""}</span></label></div>`;
   const field = c.input === "number"
@@ -195,7 +203,7 @@ function buildControls() {
   $("controls").addEventListener("input", e => {
     const { group, key } = e.target.dataset;
     if (!group) return;
-    const v = e.target.type === "checkbox" ? e.target.checked : e.target.type === "radio" ? e.target.value : Number(e.target.value);
+    const v = e.target.type === "checkbox" ? e.target.checked : e.target.type === "radio" || e.target.tagName === "SELECT" ? e.target.value : Number(e.target.value);
     S.scenario[group][key] = v;
     if (group === "shocks") { S.preset = null; syncPresets(); }  // a hand-set shock is no longer the preset
     syncOutputs();
@@ -208,6 +216,11 @@ function syncControls() {
   const nested = !!(REGION_TEXT[S.scenario.region] || {}).tracts;
   for (const c of PARAM_CTL.filter(c => c.nested)) $(`params-${c.key}`).closest(".ctl").hidden = !nested;
   syncPresets();
+  const metros = S.metros[S.scenario.region] || [];
+  const main = metros[0] ? `Main metro (${metros[0].name})` : "Main metro";
+  $("shocks-metro_target").innerHTML = [["main", main], ["all", `Every metro${metros.length ? ` (${metros.length})` : ""}`],
+    ...metros.slice(1).map(m => [String(m.id), m.name])].map(([v, l]) => `<option value="${v}">${esc(l)}</option>`).join("");
+  $("shocks-metro_target").closest(".ctl").hidden = metros.length < 2;
   for (const [group, list] of [["shocks", SHOCK_CTL], ["params", PARAM_CTL]]) for (const c of list.filter(c => c.key)) {
     const el = $(`${group}-${c.key}`), v = S.scenario[group][c.key];
     if (c.check) el.checked = !!v; else el.value = v;
@@ -365,6 +378,10 @@ function drawTiles(r) {
   if (sh.rural_amenity_pct) parts.push(`rural amenities ${pct(sh.rural_amenity_pct, 0)}`);
   const preset = PRESETS.find(q => q.id === S.preset);
   if (preset && parts.length) parts[0] = `${preset.label}: ${parts[0]}`;
+  const city = sh.core_productivity_pct || sh.core_floor_supply_pct || sh.core_amenity_pct || sh.metro_travel_cut_pct;
+  const ms = S.metros[S.scenario.region] || [];
+  if (city && ms.length > 1 && sh.metro_target !== "main")
+    parts.push(sh.metro_target === "all" ? "city shocks in every metro" : `city shocks in ${(ms.find(m => String(m.id) === sh.metro_target) || {}).name}`);
   $("scenarioLine").textContent = FIXTURE ? "Sample results" : parts.length ? "Shock: " + parts.join(", ") : "No shock";
 }
 
@@ -534,6 +551,13 @@ function drawPolygonMap(r, geo, full) {
     const core = r.counties.findIndex(c => c.kind === "core");
     svg.append("text").attr("class", "label").attr("x", px(C[core].x)).attr("y", py(C[core].y) + 4)
       .attr("text-anchor", "middle").text(r.region.core_label);
+    // the next largest metros, labelled at their core county (more would clutter the map)
+    for (const m of (r.metros || []).slice(1).sort((a, b) => b.N0 - a.N0).slice(0, 5)) {
+      const k = C.findIndex(c => c.name === m.core);
+      if (k < 0) continue;
+      svg.append("text").attr("class", "label minor").attr("x", px(C[k].x)).attr("y", py(C[k].y) + 4)
+        .attr("text-anchor", "middle").text(m.name.split(/[-,]/)[0]);
+    }
   }
   const km = [25, 50, 100, 200].find(v => v * k > 60) || 200;
   const sb = svg.append("g").attr("transform", `translate(14,${H - 12})`);
@@ -671,9 +695,22 @@ function drawDiagnostics(r, dx) {
 }
 
 // ------------------------------------------------------------------ view state
+function drawMetros(r) {
+  const ms = r.metros || [];
+  $("metroBox").hidden = ms.length < 2;
+  if (ms.length < 2) return;
+  const t = S.scenario.shocks.metro_target;
+  const hit = m => t === "all" || String(m.id) === t || (t === "main" && m.id === 0);
+  $("metroTable").innerHTML = `<table><thead><tr><th>Metro area</th><th>Core county</th><th>Resident workers</th><th>Residents Δ</th><th>Core floor rent Δ</th></tr></thead><tbody>`
+    + ms.map(m => `<tr${hit(m) ? ' class="on"' : ""}><td>${esc(m.name)}${m.tracts ? ` <span class="muted small">(${m.tracts} tracts)</span>` : ""}</td>`
+      + `<td>${esc(m.core)}</td><td>${int(m.N0)}</td><td>${pct(m.dN_pct)}</td><td>${pct(m.core_rent_pct)}</td></tr>`).join("")
+    + "</tbody></table>";
+}
+
 function render() {
   const r = S.result;
   if (!r || $("output").hidden) return;
+  drawMetros(r);
   drawTiles(r);
   drawMap(r);
   drawChange(r);

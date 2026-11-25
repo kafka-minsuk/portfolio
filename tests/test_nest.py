@@ -192,3 +192,57 @@ def test_random_nested_economies(Z, seed, ratio, shock):
     eq = solve_static(f, p, N0=cal.baseline.N, x0=cal.baseline.within.x)
     assert eq.info.converged and np.all(eq.N > 0)
     assert eq.N.sum() == pytest.approx(data.N.sum(), rel=1e-9)
+
+
+# --- several metros (multi-polar, spec §3.12) -------------------------------------------------
+
+
+def two_metros(data):
+    """The synthetic metro split in two nests: west (x <= 0, holds the core) and east."""
+    nest = np.full(data.N.size, -1)
+    metro = ~data.rural
+    nest[metro & (data.x <= 0)] = 0
+    nest[metro & (data.x > 0)] = 1
+    return replace(data, nest=nest)
+
+
+def test_two_metros_with_lam_M_equal_lam_R_equal_the_flat_model(params):
+    data = synthetic_state()
+
+    def long_run(d):
+        cal = calibrate(d, params)
+        f = with_shocks(cal.fundamentals, core=d.core, a_TH=params.a_TH, core_productivity_pct=10.0)
+        return solve_static(f, params, N0=d.N, x0=cal.baseline.within.x).N
+
+    np.testing.assert_allclose(long_run(two_metros(data)), long_run(data), rtol=1e-9)
+
+
+def test_a_shock_to_one_metro_reaches_the_other_and_the_countryside():
+    d = two_metros(synthetic_state())
+    p = Params(lam_M_over_R=2.0)
+    cal = calibrate(d, p)
+    assert all(err < 1e-7 for err in cal.max_rel_error.values())
+    assert cal.fundamentals.tau.shape == (18, 18)  # 16 rural counties + 2 metros
+    east = d.nest == 1
+    f = replace(cal.fundamentals, A=cal.fundamentals.A * np.where(east, 1.1, 1.0))  # the east metro gets nicer
+    eq = solve_static(f, p, N0=d.N, x0=cal.baseline.within.x)
+    assert eq.info.converged
+    assert eq.N[east].sum() > d.N[east].sum()
+    assert eq.N[d.nest == 0].sum() < d.N[d.nest == 0].sum() and eq.N[d.rural].sum() < d.N[d.rural].sum()
+    assert eq.N.sum() == pytest.approx(d.N.sum(), rel=1e-10)
+
+
+def test_path_re_sorts_inside_each_metro_separately():
+    d = two_metros(synthetic_state())
+    p = Params(lam_M_over_R=2.0)
+    cal = calibrate(d, p)
+    f1 = with_shocks(cal.fundamentals, core=d.core_mask, a_TH=p.a_TH, core_productivity_pct=10.0)
+    path = simulate(cal.fundamentals, f1, p, N0=cal.baseline.N, x0=cal.baseline.within.x, immigration=np.zeros(15),
+                    stop=ConsolidationStop(d.rural, p.epsilon, p.ss_tol))  # fmt: skip
+    assert path.all_converged
+    t, w = 8, path.within[8]
+    shares = np.exp(blocks.residence_log_shares(w.lnu, p.lam_R, d.nest, p.lam_M))
+    for k in (0, 1):
+        m = d.nest == k
+        np.testing.assert_allclose(path.N[t, m] / path.N[t, m].sum(), shares[m] / shares[m].sum(), rtol=1e-7)
+    np.testing.assert_allclose(path.N.sum(axis=1), d.N.sum(), rtol=1e-9)

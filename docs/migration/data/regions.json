@@ -6,7 +6,8 @@
    "counties": 67,
    "core_label": "Jefferson",
    "suburbs": 30,
-   "rural": 36
+   "rural": 36,
+   "metros": 13
   },
   {
    "id": "AZ_2022",
@@ -14,7 +15,8 @@
    "counties": 15,
    "core_label": "Maricopa",
    "suburbs": 7,
-   "rural": 7
+   "rural": 7,
+   "metros": 7
   },
   {
    "id": "AR_2022",
@@ -22,7 +24,8 @@
    "counties": 75,
    "core_label": "Pulaski",
    "suburbs": 16,
-   "rural": 58
+   "rural": 58,
+   "metros": 7
   },
   {
    "id": "CA_2022",
@@ -30,7 +33,8 @@
    "counties": 58,
    "core_label": "Los Angeles",
    "suburbs": 36,
-   "rural": 21
+   "rural": 21,
+   "metros": 25
   },
   {
    "id": "CO_2022",
@@ -38,7 +42,8 @@
    "counties": 64,
    "core_label": "Denver",
    "suburbs": 16,
-   "rural": 47
+   "rural": 47,
+   "metros": 7
   },
   {
    "id": "DE_2022",
@@ -46,7 +51,8 @@
    "counties": 3,
    "core_label": "New Castle",
    "suburbs": 1,
-   "rural": 1
+   "rural": 1,
+   "metros": 2
   },
   {
    "id": "FL_2022",
@@ -54,7 +60,8 @@
    "counties": 67,
    "core_label": "Miami-Dade",
    "suburbs": 44,
-   "rural": 22
+   "rural": 22,
+   "metros": 22
   },
   {
    "id": "GA_2022",
@@ -62,7 +69,8 @@
    "counties": 159,
    "core_label": "Fulton",
    "suburbs": 73,
-   "rural": 85
+   "rural": 85,
+   "metros": 15
   },
   {
    "id": "ID_2022",
@@ -70,7 +78,8 @@
    "counties": 44,
    "core_label": "Ada",
    "suburbs": 13,
-   "rural": 30
+   "rural": 30,
+   "metros": 7
   },
   {
    "id": "IL_2022",
@@ -78,7 +87,8 @@
    "counties": 102,
    "core_label": "Cook",
    "suburbs": 36,
-   "rural": 65
+   "rural": 65,
+   "metros": 12
   },
   {
    "id": "IN_2022",
@@ -86,7 +96,8 @@
    "counties": 92,
    "core_label": "Marion",
    "suburbs": 43,
-   "rural": 48
+   "rural": 48,
+   "metros": 15
   },
   {
    "id": "IA_2022",
@@ -95,6 +106,7 @@
    "core_label": "Polk (Des Moines)",
    "suburbs": 21,
    "rural": 77,
+   "metros": 9,
    "tracts": 162
   },
   {
@@ -103,7 +115,8 @@
    "counties": 105,
    "core_label": "Johnson",
    "suburbs": 19,
-   "rural": 85
+   "rural": 85,
+   "metros": 7
   },
   {
    "id": "KY_2022",
@@ -111,7 +124,8 @@
    "counties": 120,
    "core_label": "Jefferson",
    "suburbs": 38,
-   "rural": 81
+   "rural": 81,
+   "metros": 9
   },
   {
    "id": "LA_2022",
@@ -119,7 +133,8 @@
    "counties": 64,
    "core_label": "East Baton Rouge",
    "suburbs": 36,
-   "rural": 27
+   "rural": 27,
+   "metros": 10
   },
   {
    "id": "ME_2022",
@@ -127,7 +142,8 @@
    "counties": 16,
    "core_label": "Cumberland",
    "suburbs": 4,
-   "rural": 11
+   "rural": 11,
+   "metros": 3
   },
   {
    "id": "MD_2022",
@@ -135,7 +151,8 @@
    "counties": 24,
    "core_label": "Montgomery",
    "suburbs": 16,
-   "rural": 7
+   "rural": 7,
+   "metros": 6
   },
   {
    "id": "MA_2022",
@@ -143,7 +160,8 @@
    "counties": 14,
    "core_label": "Middlesex",
    "suburbs": 10,
-   "rural": 3
+   "rural": 3,
+   "metros": 7
   },
   {
    "id": "MI_2022",
@@ -151,7 +169,8 @@
    "counties": 83,
    "core_label": "Oakland",
    "suburbs": 29,
-   "rural": 53
+   "rural": 53,
+   "metros": 16
   },
   {
    "id": "MN_2022",
@@ -159,7 +178,8 @@
    "counties": 87,
    "core_label": "Hennepin",
    "suburbs": 26,
-   "rural": 60
+   "rural": 60,
+   "metros": 9
   },
   {
    "id": "MS_2022",
@@ -167,7 +187,8 @@
    "counties": 82,
    "core_label": "Hinds",
    "suburbs": 19,
-   "rural": 62
+   "rural": 62,
+   "metros": 4
   },
   {
    "id": "MO_2022",
@@ -175,7 +196,8 @@
    "counties": 115,
    "core_label": "St. Louis",
    "suburbs": 34,
-   "rural": 80
+   "rural": 80,
+   "metros": 8
   },
   {
    "id": "MT_2022",
@@ -183,7 +205,8 @@
    "counties": 56,
    "core_label": "Yellowstone",
    "suburbs": 9,
-   "rural": 46
+   "rural": 46,
+   "metros": 5
   },
   {
    "id": "NE_2022",
@@ -191,7 +214,8 @@
    "counties": 93,
    "core_label": "Douglas",
    "suburbs": 10,
-   "rural": 82
+   "rural": 82,
+   "metros": 4
   },
   {
    "id": "NV_2022",
@@ -199,7 +223,8 @@
    "counties": 17,
    "core_label": "Clark",
    "suburbs": 4,
-   "rural": 12
+   "rural": 12,
+   "metros": 3
   },
   {
    "id": "NH_2022",
@@ -207,7 +232,8 @@
    "counties": 10,
    "core_label": "Hillsborough",
    "suburbs": 2,
-   "rural": 7
+   "rural": 7,
+   "metros": 2
   },
   {
    "id": "NJ_2022",
@@ -215,7 +241,8 @@
    "counties": 21,
    "core_label": "Bergen",
    "suburbs": 20,
-   "rural": 0
+   "rural": 0,
+   "metros": 6
   },
   {
    "id": "NM_2022",
@@ -223,7 +250,8 @@
    "counties": 33,
    "core_label": "Bernalillo",
    "suburbs": 6,
-   "rural": 26
+   "rural": 26,
+   "metros": 4
   },
   {
    "id": "NY_2022",
@@ -231,7 +259,8 @@
    "counties": 62,
    "core_label": "New York",
    "suburbs": 36,
-   "rural": 25
+   "rural": 25,
+   "metros": 13
   },
   {
    "id": "NC_2022",
@@ -239,7 +268,8 @@
    "counties": 100,
    "core_label": "Mecklenburg",
    "suburbs": 44,
-   "rural": 55
+   "rural": 55,
+   "metros": 16
   },
   {
    "id": "ND_2022",
@@ -247,7 +277,8 @@
    "counties": 53,
    "core_label": "Cass",
    "suburbs": 7,
-   "rural": 45
+   "rural": 45,
+   "metros": 4
   },
   {
    "id": "OH_2022",
@@ -255,7 +286,8 @@
    "counties": 88,
    "core_label": "Franklin",
    "suburbs": 40,
-   "rural": 47
+   "rural": 47,
+   "metros": 15
   },
   {
    "id": "OK_2022",
@@ -263,7 +295,8 @@
    "counties": 77,
    "core_label": "Oklahoma",
    "suburbs": 17,
-   "rural": 59
+   "rural": 59,
+   "metros": 5
   },
   {
    "id": "OR_2022",
@@ -271,7 +304,8 @@
    "counties": 36,
    "core_label": "Multnomah",
    "suburbs": 14,
-   "rural": 21
+   "rural": 21,
+   "metros": 8
   },
   {
    "id": "PA_2022",
@@ -279,7 +313,8 @@
    "counties": 67,
    "core_label": "Philadelphia",
    "suburbs": 32,
-   "rural": 34
+   "rural": 34,
+   "metros": 16
   },
   {
    "id": "RI_2022",
@@ -287,7 +322,8 @@
    "counties": 5,
    "core_label": "Providence",
    "suburbs": 4,
-   "rural": 0
+   "rural": 0,
+   "metros": 1
   },
   {
    "id": "SC_2022",
@@ -295,7 +331,8 @@
    "counties": 46,
    "core_label": "Greenville",
    "suburbs": 25,
-   "rural": 20
+   "rural": 20,
+   "metros": 10
   },
   {
    "id": "SD_2022",
@@ -303,7 +340,8 @@
    "counties": 66,
    "core_label": "Minnehaha",
    "suburbs": 7,
-   "rural": 58
+   "rural": 58,
+   "metros": 3
   },
   {
    "id": "TN_2022",
@@ -311,7 +349,8 @@
    "counties": 95,
    "core_label": "Davidson",
    "suburbs": 43,
-   "rural": 51
+   "rural": 51,
+   "metros": 10
   },
   {
    "id": "TX_2022",
@@ -319,7 +358,8 @@
    "counties": 254,
    "core_label": "Harris",
    "suburbs": 85,
-   "rural": 168
+   "rural": 168,
+   "metros": 26
   },
   {
    "id": "UT_2022",
@@ -327,7 +367,8 @@
    "counties": 29,
    "core_label": "Salt Lake",
    "suburbs": 8,
-   "rural": 20
+   "rural": 20,
+   "metros": 5
   },
   {
    "id": "VT_2022",
@@ -335,7 +376,8 @@
    "counties": 14,
    "core_label": "Chittenden",
    "suburbs": 2,
-   "rural": 11
+   "rural": 11,
+   "metros": 1
   },
   {
    "id": "VA_2022",
@@ -343,7 +385,8 @@
    "counties": 105,
    "core_label": "Fairfax, Fairfax City + Falls Church",
    "suburbs": 60,
-   "rural": 44
+   "rural": 44,
+   "metros": 11
   },
   {
    "id": "WA_2022",
@@ -351,7 +394,8 @@
    "counties": 39,
    "core_label": "King",
    "suburbs": 18,
-   "rural": 20
+   "rural": 20,
+   "metros": 13
   },
   {
    "id": "WV_2022",
@@ -359,7 +403,8 @@
    "counties": 55,
    "core_label": "Kanawha",
    "suburbs": 19,
-   "rural": 35
+   "rural": 35,
+   "metros": 10
   },
   {
    "id": "WI_2022",
@@ -367,7 +412,8 @@
    "counties": 72,
    "core_label": "Milwaukee",
    "suburbs": 26,
-   "rural": 45
+   "rural": 45,
+   "metros": 15
   },
   {
    "id": "WY_2022",
@@ -375,7 +421,8 @@
    "counties": 23,
    "core_label": "Laramie",
    "suburbs": 1,
-   "rural": 21
+   "rural": 21,
+   "metros": 2
   }
  ]
 }

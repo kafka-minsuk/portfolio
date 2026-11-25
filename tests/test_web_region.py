@@ -132,7 +132,7 @@ def test_document_matches_the_built_state():
     if not (state_dir("IA", 2022) / METRO_FILE).exists():
         pytest.skip("Iowa metro data not built")
     built, doc = load_metro("IA", 2022), api.county_data(DOC)
-    np.testing.assert_array_equal(doc.nest, built.nest)
+    np.testing.assert_array_equal(doc.nest == 0, built.nest == 0)  # Des Moines (metro 0) is the built tracts; other metros are labelled at export
     assert built.names == doc.names and list(built.kind) == list(doc.kind)
     for k in ("x", "y", "N", "HU", "HA", "L", "TF", "wA_obs", "omega", "gateway"):
         np.testing.assert_array_equal(getattr(doc, k), getattr(built, k), err_msg=k)
@@ -146,3 +146,38 @@ def test_document_matches_the_built_state():
     got, want = api.run(sc, DOC)["long_run"]["totals"], api.run(sc, full)["long_run"]["totals"]
     for k in want:
         assert got[k] == pytest.approx(want[k], abs=1e-3), k
+
+
+# --- several metros (spec §3.12) -------------------------------------------------------------
+
+
+def test_iowa_has_its_metros_with_des_moines_first():
+    ms = DOC["metros"]
+    assert len(ms) == 9 and ms[0]["name"].startswith("Des Moines") and ms[0]["tracts"] == 162
+    nest, core = np.asarray(DOC["counties"]["nest"]), np.asarray(DOC["counties"]["metro_core"])
+    assert set(nest[nest >= 0]) == set(range(9))
+    for m in ms:
+        assert core[nest == m["id"]].any()  # every metro has its core zone(s)
+
+
+@pytest.mark.parametrize("target", ["main", "all", "2"])
+def test_metro_targets_run_and_report_every_metro(target):
+    sc = api.default_scenario(DOC)
+    sc["shocks"]["metro_target"] = target
+    out = api.run(sc, DOC)
+    assert out["long_run"]["solve"]["converged"] and out["path"]["all_converged"]
+    ms = out["metros"]
+    assert [m["id"] for m in ms] == list(range(9))
+    moved = {m["id"]: m["dN_pct"] for m in ms}
+    hit = 0 if target == "main" else (2 if target == "2" else None)
+    if hit is not None:  # the targeted metro's core rent rises more than any other metro's
+        rents = {m["id"]: m["core_rent_pct"] for m in ms}
+        assert rents[hit] == max(rents.values())
+    assert sum(m["N1"] for m in ms) <= sum(c["N0"] for c in out["counties"]) + 1e-6 and moved
+
+
+def test_an_unknown_metro_target_is_rejected():
+    sc = api.default_scenario(DOC)
+    sc["shocks"]["metro_target"] = "99"
+    with pytest.raises(ValueError, match="metro_target"):
+        api.run(sc, DOC)

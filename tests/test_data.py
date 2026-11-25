@@ -325,3 +325,16 @@ def test_zero_gateway_gets_no_arrivals():
         warnings.simplefilter("error")
         s = arrival_shares(np.zeros(3), np.zeros(3), np.array([1.0, 0.0, 2.0]), 2.0)
     assert s[1] == 0.0 and abs(s.sum() - 1.0) < 1e-12
+
+
+def test_committed_browser_bundle_is_up_to_date(tmp_path):
+    """docs/py/urqse.zip is what the page runs. The build is deterministic, so a stale bundle (the
+    page running an older model than the tests) shows up as a byte difference.
+    Fix: python scripts/build_py_bundle.py"""
+    sys.path.insert(0, str(ROOT / "scripts"))
+    try:
+        import build_py_bundle
+    finally:
+        sys.path.pop(0)
+    fresh = build_py_bundle.build(tmp_path / "urqse.zip").read_bytes()
+    assert fresh == (ROOT / "docs" / "py" / "urqse.zip").read_bytes(), "run python scripts/build_py_bundle.py"

@@ -22,7 +22,9 @@ Moving home is slower than changing jobs. The long run uses a second, less elast
 
 The path stops when farmland per rural farm worker has risen by the consolidation target ε, or when nothing moves any more. Land income is wealth. A farmer who moves keeps it, so it does not hold anyone in place unless you turn that switch on.
 
-Two extensions handle real geography. A county or tract with no farm jobs has no farm option at all (spec §3.11). In Iowa the Des Moines metro area is split into 162 census tracts (spec §3.12). People first choose between the metro and other counties, then choose a tract within the metro. Double-click the metro on the map to see it.
+Two extensions handle real geography. A county or tract with no farm jobs has no farm option at all (spec §3.11). Each state also has several poles (spec §3.12). Every metropolitan area is a group of counties. People first choose a rural county or one of the metros, then choose a place inside that metro. The λ_M / λ_R slider sets how much more readily people move within a metro than between metros. At 1, the default, every place competes on equal terms. In Iowa the Des Moines metro area is split further into 162 census tracts. Double-click it on the map to see them.
+
+The city shocks and presets act on the main metro by default. The **Where the city shocks land** menu sends them to every metro or to one metro instead. The **Metro areas** table under the map shows each metro's change in residents and in core floor rent.
 
 ## How the numbers are pinned down
 

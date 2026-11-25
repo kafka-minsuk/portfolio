@@ -226,12 +226,14 @@ In the solver the unknown $\ln w_{An}$ of such a location is a placeholder that 
 leaves in place (residual 0), so the convergence contract is unchanged. A county with a vanishing farm
 sector converges to this case (tested).
 
-### 3.12 A metro nest (city view)
+### 3.12 Metro nests (several metros, city view)
 
-The core's Metropolitan Statistical Area (its in-state part) can be split into census tracts that are
-zones of their own. Workplace choice (L), floor space (R), (Z) and (F) run unchanged on all zones
+Every Metropolitan Statistical Area of the state (its in-state counties) is a nest $\mathcal K$, so a
+state has several poles. Most nests hold counties. The core's metro can also be split into census
+tracts that are zones of their own (Iowa: Des Moines). Below, a nest's zones are its counties or tracts. Workplace choice (L), floor space (R), (Z) and (F) run unchanged on all zones
 (counties outside the metro, tracts, the external zone). Only the residence choice is nested: residents
-pick a county or the metro with $\lambda_R$, then a tract inside the metro with $\lambda_M\ge\lambda_R$:
+pick a non-metro county or one of the metros with $\lambda_R$, then a zone inside the metro with $\lambda_M\ge\lambda_R$
+(one $\lambda_M$ for every metro). For one metro $M$:
 
 $$
 u_M=\Big(\sum_{k\in\mathcal K}u_k^{\lambda_M}\Big)^{1/\lambda_M},\quad
@@ -241,11 +243,18 @@ N_k=N_M\frac{u_k^{\lambda_M}}{\sum_{k'}u_{k'}^{\lambda_M}} .
 \tag{S'}
 $$
 
-$W$ is (S) over counties and the metro. $\lambda_M=\lambda_R$ is the flat choice over counties and tracts.
+$u_{c'}^{\lambda_R}$ in the denominators runs over non-metro counties and every metro's $u_M^{\lambda_R}$.
+$W$ is (S) over non-metro counties and the metros. $\lambda_M=\lambda_R$ is the flat choice over counties and tracts.
 **Calibration** (§5 step 7): $\ln A_k=\frac{\ln N_k}{\lambda_M}+\ln N_M\big(\frac1{\lambda_R}-\frac1{\lambda_M}\big)+(1-\alpha)\ln r_k-\frac{\ln\Phi_k}{\lambda}$.
-**Path** (§3.8): flows, flow offsets $\delta$ and arrivals act on residence units (counties and the
-metro as a whole); migration costs into and out of the metro use resident-weighted distances
-(`# VERIFY`). Inside the metro, residents re-sort to (S') every period (moving within a metro is fast).
+**Path** (§3.8): flows, flow offsets $\delta$ and arrivals act on residence units (non-metro counties
+and each metro as a whole); migration costs into and out of the metro use resident-weighted distances
+(`# VERIFY`). Inside each metro, residents re-sort to (S') every period (moving within a metro is fast).
+With $\lambda_M=\lambda_R$ the long run equals the flat model, but the path differs: a metro moves as one
+unit, and people inside it re-sort at once.
+**Shocks**: a city shock (core productivity, floor supply, amenities, travel inside the metro) lands on
+the main metro (the state's core and its metro), on every metro, or on one chosen metro. A metro's
+core is its county with the most non-farm jobs. Metro membership comes from the OMB 2023
+delineations (`cbsa-est2023-alldata.csv`) when the state is exported for the web.
 **Data** (`urqse.data.build_metro`): each county total is split over its tracts by LODES residents (RAC)
 and jobs (WAC; farm jobs = NAICS 11 on tracts with CDL cropland), GHSL floor space and CDL farmland,
 so tracts add up to their county exactly; farm wage, owner share and gateway are the county's. Most
@@ -486,8 +495,9 @@ urqse/
 4. **M4 (assets):** price paths, ownership options, validation against NASS land values and FHFA.
 5. **M5 (hat algebra + JAX):** fast counterfactuals, dynamic hat algebra, uniqueness checks.
 6. **M6 (app polish / migrate front end if needed).**
-7. **M7 (city view):** a metro nest of census tracts (§3.12). M7a single metro (done for Iowa); M7b
-   agglomeration and amenity spillovers with travel-time decay at tract scale; M7c several metros.
+7. **M7 (city view):** metro nests (§3.12). M7a tracts for one metro (done for Iowa); M7c every metro as
+   a nest of counties (done); M7b agglomeration and amenity spillovers with travel-time decay at tract
+   scale.
 
 ## 12. Decisions (resolved, v1.1)
 
@@ -497,8 +507,8 @@ urqse/
 4. First state: Iowa (then Kansas, Nebraska).
 5. **Locations without a farm sector are allowed** (§3.11, decided 2026-11-24). Needed for city counties
    with no farm jobs and for census tracts in the metro nest (proposal M7).
-6. **Metro nest, v1 (§3.12, decided 2026-11-24, proposal M7 defaults):** one nest, the in-state part of
-   the core's metro area; residents re-sort inside it every period; $\lambda_M/\lambda_R$ = 1 by default
+6. **Metro nests (§3.12, decided 2026-11-24/25, proposal M7 defaults):** every Metropolitan Statistical
+   Area is a nest (multi-polar, at county level), and the core's metro may be split into tracts; residents re-sort inside it every period; $\lambda_M/\lambda_R$ = 1 by default
    with a slider (`# VERIFY`, no estimate); at most 400 tracts; a metro's out-of-state part stays in the
    external zone. Several metros (multi-polar) later.
 
@@ -526,6 +536,8 @@ $\bar N_{t+1}=\bar N_t+I_t$. New arrivals choose a county by the same residence 
   $\lambda_M\ge\lambda_R$ (`Params.lam_M_over_R`), path flows between residence units with re-sorting
   inside the metro. Decision 12.6. Pre-existing and flagged (`# VERIFY`, §12.2): immigrant arrivals
   choose a residence unit without weighting by its size, so they over-weight small units.
+- **2026-11-25.** §3.12: every Metropolitan Statistical Area is a nest (multi-polar); city shocks take a
+  metro target. Path flows now move metros as units in every state.
 
 ---
 

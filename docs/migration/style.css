@@ -117,3 +117,7 @@ button:disabled { opacity: .5; cursor: default; }
 .presets button:hover { border-color: var(--text-2); }
 .presets button.on { background: var(--text); color: var(--surface); border-color: var(--text); }
 .ctl-head { font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-2); margin: 16px 0 4px; }
+
+/* metro areas */
+#map .label.minor { font-size: 10px; font-weight: 500; }
+#metroTable tr.on td { font-weight: 600; }

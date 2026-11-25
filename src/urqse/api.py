@@ -56,6 +56,7 @@ DEFAULT_SHOCKS = {
     "core_amenity_pct": 0.0,
     "metro_travel_cut_pct": 0.0,
     "rural_amenity_pct": 0.0,
+    "metro_target": "main",  # where the city shocks land: "main", "all", or a metro id from the region's metros
     "immigration_per_period": 0.0,
     "periods": 60,
 }
@@ -144,6 +145,10 @@ def _parse(scenario: dict, doc=None):
            "metro_travel_cut_pct", "rural_amenity_pct")
     for k in (*PCT, "immigration_per_period"):
         s[k] = _number(k, s[k])
+    targets = {"main", "all"} | {str(m["id"]) for m in (doc or {}).get("metros", [])}
+    s["metro_target"] = str(s["metro_target"])
+    if s["metro_target"] not in targets:
+        raise ValueError(f"metro_target must be one of {sorted(targets)}")
     if s["travel_cut_scope"] not in TRAVEL_SCOPES:
         raise ValueError(f"travel_cut_scope must be one of {TRAVEL_SCOPES}")
     for k in ("travel_cut_pct", "metro_travel_cut_pct"):
@@ -204,7 +209,8 @@ def run(scenario: dict, region_doc: dict | None = None) -> dict:
         raise ValueError("scenario must be an object with 'params' and 'shocks'")
     data, doc = _region(scenario, region_doc)
     p, s = _parse(scenario, doc)
-    R, core, T = data.rural, data.core_mask, s["periods"]  # core: the core county's zone(s)
+    R, T = data.rural, s["periods"]
+    core, metro = _targets(data, doc, s["metro_target"])  # the zones the city shocks act on
     urban = ~R
 
     cal = calibrate(data, p)
@@ -222,7 +228,7 @@ def run(scenario: dict, region_doc: dict | None = None) -> dict:
         core_amenity_pct=s["core_amenity_pct"],
         metro_travel_cut_pct=s["metro_travel_cut_pct"],
         rural_amenity_pct=s["rural_amenity_pct"],
-        metro=np.isin(data.kind, ("core", "suburb")),
+        metro=metro,
         rural=R,
     )
     imm = immigration_path(s["immigration_per_period"], T)
@@ -322,9 +328,39 @@ def run(scenario: dict, region_doc: dict | None = None) -> dict:
     }
     if doc:
         out.update(_real_units(doc, data, base, lr, R))
-    if doc and data.nest is not None:
+    if doc and doc.get("metros"):
+        out["metros"] = _metro_results(doc, data, f0, base, lr)
+    if doc and "county_view" in doc:
         out = _county_view(out, doc, data, f0, base, lr, path)
     return _json(out)
+
+
+def _targets(data, doc, target: str):
+    """(core zones, metro zones) of the metro the city shocks target. "main" is the state's core and
+    its metro; "all" is every metro's core and every metro; a metro id picks one (spec §3.12)."""
+    nest = data.nest
+    if nest is None or not np.any(nest >= 0):  # no metro nests: the old reading
+        return data.core_mask, np.isin(data.kind, ("core", "suburb"))
+    metro_core = np.asarray(doc["counties"]["metro_core"], bool)
+    if target == "main":
+        return data.core_mask, nest == nest[data.core]
+    if target == "all":
+        return metro_core, nest >= 0
+    k = int(target)
+    return metro_core & (nest == k), nest == k
+
+
+def _metro_results(doc, data, f0, base, lr) -> list:
+    """Per metro: resident workers and the floor rent in its core, baseline and long run."""
+    metro_core = np.asarray(doc["counties"]["metro_core"], bool)
+    L0, out = data.L, []
+    for m in doc["metros"]:
+        inside = data.nest == m["id"]
+        cz = inside & metro_core
+        r0, r1 = base.within.r[cz] @ L0[cz], lr.within.r[cz] @ L0[cz]
+        out.append(m | {"N0": base.N[inside].sum(), "N1": lr.N[inside].sum(), "dN_pct": _pct(lr.N[inside].sum(), base.N[inside].sum()),
+                        "core_rent_pct": _pct(r1, r0)})  # fmt: skip
+    return out
 
 
 def _county_view(out: dict, doc: dict, data, f0, base, lr, path) -> dict:
@@ -347,7 +383,7 @@ def _county_view(out: dict, doc: dict, data, f0, base, lr, path) -> dict:
             return (M @ (v * wt)) / (M @ wt)
 
     L0 = data.L  # baseline floor space (observed; equals L_bar r0^mu at the calibrated baseline)
-    inside = data.nest >= 0
+    inside = np.array([z != pz for z, pz in zip(c["fips"], c["parent"])])  # tracts: a zone that is not its own county
     zone_lr = out["long_run"]
     city = {
         "zones": [z | {"parent": c["parent"][i], "county_index": int(member[i])} for i, z in enumerate(out["counties"]) if inside[i]],
