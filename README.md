@@ -40,6 +40,7 @@ python3 -m http.server -d docs 8000   # then open http://localhost:8000
 ## Urban–rural migration simulator (`docs/migration.html`)
 
 The URQSE model (`src/urqse`, spec in `URQSE_model_spec.md`) runs in the browser under Pyodide.
+[HOW_IT_WORKS.md](HOW_IT_WORKS.md) explains the model and the modelling standards it follows in two pages.
 Regions: a synthetic 25-county state and every U.S. state the 2022 sources can build, one state at a
 time (`reports/STATES_STATUS.md` lists which, and why the others are left out: Alaska, Hawaii,
 Connecticut, DC, and the states with a county that has no farm jobs). Iowa 2022 (99 counties, Polk as
