@@ -115,7 +115,8 @@ class ConsolidationStop:
         return 1.0 + self.epsilon
 
     def land_per_worker_ratio(self, TF, HA_path):
-        per_worker = TF[self.rural].sum() / HA_path[:, self.rural].sum(axis=1)
+        with np.errstate(invalid="ignore"):  # NaN when the state has no rural county (New Jersey, Rhode Island)
+            per_worker = TF[self.rural].sum() / HA_path[:, self.rural].sum(axis=1)
         return per_worker / per_worker[0]
 
     def evaluate(self, land_ratio, next_change):

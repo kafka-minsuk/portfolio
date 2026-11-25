@@ -128,7 +128,8 @@ async function loadRegions() {
     const core = r.core_label.includes("(") ? r.core_label : `${r.core_label} County`;
     REGION_TEXT[r.id] = { sub: `${r.label}, ${r.counties} counties`, tracts: r.tracts || 0,
       help: `Real county data. The core is ${core}; ${r.suburbs} suburbs are the other metro-area counties, ${r.rural} are rural.`
-        + (r.tracts ? ` The core's metro area is modelled by its ${r.tracts} census tracts: double-click it on the map.` : "") };
+        + (r.tracts ? ` The core's metro area is modelled by its ${r.tracts} census tracts: double-click it on the map.` : "")
+        + (r.rural === 0 ? " Every county is in a metro area, so there is no countryside to consolidate and the rural measures are blank." : "") };
   }
   const opt = (id, text) => `<option value="${id}">${esc(text)}</option>`;
   const states = regions.length ? regions : [{ id: "IA_2022", label: "Iowa 2022", counties: 99 }];

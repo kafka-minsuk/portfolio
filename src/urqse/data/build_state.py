@@ -381,7 +381,10 @@ def cash_rent(df: pd.DataFrame, year: int, state_fips: str) -> tuple[dict, str]:
     rent = nass_series(df, "RENT, CASH, CROPLAND, NON-IRRIGATED - EXPENSE, MEASURED IN $ / ACRE", year, "SURVEY", state_fips)
     if np.isfinite(rent["state"]) or not rent["county"].dropna().empty:
         return rent, "non-irrigated"
-    return nass_series(df, "RENT, CASH, CROPLAND, IRRIGATED - EXPENSE, MEASURED IN $ / ACRE", year, "SURVEY", state_fips), "irrigated"
+    wet = nass_series(df, "RENT, CASH, CROPLAND, IRRIGATED - EXPENSE, MEASURED IN $ / ACRE", year, "SURVEY", state_fips)
+    if np.isfinite(wet["state"]) or not wet["county"].dropna().empty:
+        return wet, "irrigated"
+    return rent, "non-irrigated"  # neither series: the caller decides
 
 
 def read_nass(path: Path) -> pd.DataFrame:
@@ -481,6 +484,32 @@ def travel_with_external(t_pts, d_pts, n_in: int, own_t, own_d):
     return t, d
 
 
+def fill_unroutable(t_pts, d_line):
+    """OSRM finds no road between some points (Washington's San Juan Islands, reached by ferry).
+    Those pairs get the straight-line distance at the median effective speed of the routed pairs,
+    the rule own_trip uses.  # VERIFY: ignores ferry waits and schedules. Returns (t, mask filled)."""
+    miss = np.isnan(t_pts)
+    if not miss.any():
+        return t_pts, miss
+    ok = ~miss & ~np.eye(t_pts.shape[0], dtype=bool)
+    speed = np.median(d_line[ok] / t_pts[ok])
+    return np.where(miss, d_line / speed, t_pts), miss
+
+
+def neighbour_state_rent(states, year: int, shared: Path = SHARED_RAW) -> tuple[float, dict]:
+    """Mean of the neighbouring states' published state cropland cash rent (each state's own series
+    choice, cash_rent), for a state that publishes no cropland rent at all (Rhode Island)."""
+    vals = {}
+    for st in states:
+        path, _ = fetch_nass_economics(ROOT / "data_raw" / st, st, shared)
+        rent, series = cash_rent(read_nass(path), year, STATE_FIPS[st])
+        if np.isfinite(rent["state"]):
+            vals[st] = (float(rent["state"]), series)
+    if not vals:
+        raise ValueError(f"no cropland cash rent in {', '.join(states)} either")
+    return float(np.mean([v for v, _ in vals.values()])), vals
+
+
 def own_trip(area_km2, t_pts, d_straight, n_in: int):
     """Own-county trip: mean distance between two random points in a square of the county's area,
     at the median effective (straight-line km per OSRM minute) speed between in-state counties.
@@ -559,6 +588,9 @@ def osrm_table(lonlat: np.ndarray, cache: Path):
     for a in blocks:
         for b in blocks:
             idx = np.unique(np.concatenate([a, b]))
+            if idx.size == 1:  # a one-point block: its own time is 0, and the server drops such requests
+                t[idx[0], idx[0]] = d[idx[0], idx[0]] = 0.0
+                continue
             coords = ";".join(f"{lonlat[i, 0]:.6f},{lonlat[i, 1]:.6f}" for i in idx)
             src = ";".join(str(int(np.searchsorted(idx, i))) for i in a)
             dst = ";".join(str(int(np.searchsorted(idx, i))) for i in b)
@@ -650,6 +682,14 @@ def build(state: str, year: int, raw: Path, out: Path, shared: Path = SHARED_RAW
     if rent_series == "irrigated":
         gaps.append(dict(var="cash_rent_usd_acre", fips=sf + "000",
                          rule="the state publishes no non-irrigated cropland rent; NASS irrigated cropland rent used"))
+    if not np.isfinite(rent["state"]) and rent["county"].dropna().empty and not np.isfinite(rent["other"]) and rent["other_by_district"].empty:
+        # VERIFY: Rhode Island publishes no cropland rent in any series; its neighbours' mean stands in.
+        nb_states = sorted({FIPS_STATE[f[:2]] for f in neighbor_counties(shp, sf, st_geom) if f[:2] in FIPS_STATE} - {state})
+        nb_rent, used = neighbour_state_rent(nb_states, year, shared)
+        rent = dict(rent, state=nb_rent)
+        rent_series = "neighbouring states' (" + ", ".join(f"{s} {v:g} $/acre {k}" for s, (v, k) in used.items()) + ")"
+        gaps.append(dict(var="cash_rent_usd_acre", fips=sf + "000",
+                         rule=f"no NASS cropland rent in any series; mean of {rent_series} = {nb_rent:g} $/acre"))
     df["owned_acres"] = to_zones(owned["county"], zone_of).reindex(fips)
     df["rented_acres"] = to_zones(rented["county"], zone_of).reindex(fips)
     df["farmland_census_ha"] = to_zones(farmland["county"], zone_of).reindex(fips) * ACRE_HA
@@ -738,11 +778,15 @@ def build(state: str, year: int, raw: Path, out: Path, shared: Path = SHARED_RAW
         raise ValueError(f"{state}: no out-of-state counties within {NEIGHBOR_BUFFER_M:g} m for the external zone")
     pts = pd.concat([df[["lat", "lon"]], cen.loc[nb_fips, ["lat", "lon"]]])
     t_pts, d_road, n_calls = osrm_table(pts[["lon", "lat"]].to_numpy(), raw / "osrm")
-    if np.isnan(t_pts).any():
-        i, j = np.argwhere(np.isnan(t_pts))[0]
-        raise RuntimeError(f"OSRM returned unroutable pairs, e.g. {pts.index[i]} -> {pts.index[j]}")
     d_line = haversine_km(pts["lat"].to_numpy()[:, None], pts["lon"].to_numpy()[:, None],
                           pts["lat"].to_numpy()[None, :], pts["lon"].to_numpy()[None, :])  # fmt: skip
+    t_pts, unroutable = fill_unroutable(t_pts, d_line)
+    # name the zones that most failing pairs touch (an island county), not every partner of theirs
+    per_zone = unroutable.sum(axis=0) + unroutable.sum(axis=1)
+    for k in np.nonzero(per_zone > (len(pts) - 1))[0]:
+        if pts.index[k] in df.index:
+            gaps.append(dict(var="t", fips=pts.index[k], rule=f"no road route to {int(per_zone[k]) // 2} places (OSRM); "
+                             "straight-line distance at the median routed speed"))
     own_t, own_d, speed = own_trip(df["area_km2"].to_numpy(), t_pts, d_line, Z)
     df["own_time_min"], df["own_dist_km"] = own_t, own_d
     t, dist = travel_with_external(t_pts, d_line, Z, own_t, own_d)
@@ -790,7 +834,7 @@ def build(state: str, year: int, raw: Path, out: Path, shared: Path = SHARED_RAW
     }  # fmt: skip
     meta = dict(state=state, year=year, sources=src, nass_file=nass_name, gaps=gaps, official=official,
                 neighbors=nb_fips, rent_series=rent_series, osrm_calls=n_calls, speed_km_per_min=speed, cdl_total_ha=cdl_total_ha,
-                scale=jobs["scale"], farm_wage=farm_wage, road_over_line=float(np.median(d_road[:Z, :Z][~np.eye(Z, dtype=bool)] / d_line[:Z, :Z][~np.eye(Z, dtype=bool)])),
+                scale=jobs["scale"], farm_wage=farm_wage, road_over_line=float(np.nanmedian(d_road[:Z, :Z][~np.eye(Z, dtype=bool)] / d_line[:Z, :Z][~np.eye(Z, dtype=bool)])),
                 raw=raw, shared=shared, merged=merged, crs=crs, built=dt.date.today().isoformat())  # fmt: skip
     (out / "REPORT.md").write_text(report(table, t, meta))
     return dict(table=table, t=t, dist=dist, meta=meta)

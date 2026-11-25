@@ -1,0 +1,331 @@
+{
+ "NE": {
+  "state": "NE",
+  "ok": true,
+  "step": "export",
+  "error": "",
+  "seconds": 10.90159296989441
+ },
+ "AL": {
+  "state": "AL",
+  "ok": true,
+  "step": "export",
+  "error": "",
+  "seconds": 9.557055950164795
+ },
+ "AZ": {
+  "state": "AZ",
+  "ok": true,
+  "step": "export",
+  "error": "",
+  "seconds": 11.080676078796387
+ },
+ "AR": {
+  "state": "AR",
+  "ok": true,
+  "step": "export",
+  "error": "",
+  "seconds": 106.90648174285889
+ },
+ "CA": {
+  "state": "CA",
+  "ok": true,
+  "step": "export",
+  "error": "",
+  "seconds": 440.51333928108215
+ },
+ "CO": {
+  "state": "CO",
+  "ok": true,
+  "step": "export",
+  "error": "",
+  "seconds": 176.215891122818
+ },
+ "DE": {
+  "state": "DE",
+  "ok": true,
+  "step": "export",
+  "error": "",
+  "seconds": 4.6897852420806885
+ },
+ "FL": {
+  "state": "FL",
+  "ok": true,
+  "step": "export",
+  "error": "",
+  "seconds": 289.9815170764923
+ },
+ "GA": {
+  "state": "GA",
+  "ok": true,
+  "step": "export",
+  "error": "",
+  "seconds": 248.35746002197266
+ },
+ "ID": {
+  "state": "ID",
+  "ok": true,
+  "step": "export",
+  "error": "",
+  "seconds": 366.2839298248291
+ },
+ "IL": {
+  "state": "IL",
+  "ok": true,
+  "step": "export",
+  "error": "",
+  "seconds": 351.89202308654785
+ },
+ "IN": {
+  "state": "IN",
+  "ok": true,
+  "step": "export",
+  "error": "",
+  "seconds": 9.61560606956482
+ },
+ "IA": {
+  "state": "IA",
+  "ok": true,
+  "step": "export",
+  "error": "",
+  "seconds": 9.259450197219849
+ },
+ "KS": {
+  "state": "KS",
+  "ok": true,
+  "step": "export",
+  "error": "",
+  "seconds": 273.9180450439453
+ },
+ "KY": {
+  "state": "KY",
+  "ok": true,
+  "step": "export",
+  "error": "",
+  "seconds": 17.797176122665405
+ },
+ "LA": {
+  "state": "LA",
+  "ok": true,
+  "step": "export",
+  "error": "",
+  "seconds": 171.84830498695374
+ },
+ "ME": {
+  "state": "ME",
+  "ok": true,
+  "step": "export",
+  "error": "",
+  "seconds": 160.79567098617554
+ },
+ "MD": {
+  "state": "MD",
+  "ok": true,
+  "step": "export",
+  "error": "",
+  "seconds": 86.85779190063477
+ },
+ "MA": {
+  "state": "MA",
+  "ok": true,
+  "step": "export",
+  "error": "",
+  "seconds": 17.24491286277771
+ },
+ "MI": {
+  "state": "MI",
+  "ok": true,
+  "step": "export",
+  "error": "",
+  "seconds": 22.80977988243103
+ },
+ "MN": {
+  "state": "MN",
+  "ok": true,
+  "step": "export",
+  "error": "",
+  "seconds": 367.7063159942627
+ },
+ "MS": {
+  "state": "MS",
+  "ok": true,
+  "step": "export",
+  "error": "",
+  "seconds": 254.79010105133057
+ },
+ "MO": {
+  "state": "MO",
+  "ok": true,
+  "step": "export",
+  "error": "",
+  "seconds": 387.55673599243164
+ },
+ "MT": {
+  "state": "MT",
+  "ok": true,
+  "step": "export",
+  "error": "",
+  "seconds": 549.5480599403381
+ },
+ "NV": {
+  "state": "NV",
+  "ok": true,
+  "step": "export",
+  "error": "",
+  "seconds": 14.481319189071655
+ },
+ "NH": {
+  "state": "NH",
+  "ok": true,
+  "step": "export",
+  "error": "",
+  "seconds": 92.2301127910614
+ },
+ "NJ": {
+  "state": "NJ",
+  "ok": true,
+  "step": "export",
+  "error": "",
+  "seconds": 76.83609414100647
+ },
+ "NM": {
+  "state": "NM",
+  "ok": true,
+  "step": "export",
+  "error": "",
+  "seconds": 93.01136684417725
+ },
+ "NY": {
+  "state": "NY",
+  "ok": true,
+  "step": "export",
+  "error": "",
+  "seconds": 145.91005516052246
+ },
+ "NC": {
+  "state": "NC",
+  "ok": true,
+  "step": "export",
+  "error": "",
+  "seconds": 148.3052589893341
+ },
+ "ND": {
+  "state": "ND",
+  "ok": true,
+  "step": "export",
+  "error": "",
+  "seconds": 293.56768107414246
+ },
+ "OH": {
+  "state": "OH",
+  "ok": true,
+  "step": "export",
+  "error": "",
+  "seconds": 15.231235980987549
+ },
+ "OK": {
+  "state": "OK",
+  "ok": true,
+  "step": "export",
+  "error": "",
+  "seconds": 296.09548807144165
+ },
+ "OR": {
+  "state": "OR",
+  "ok": true,
+  "step": "export",
+  "error": "",
+  "seconds": 388.33438301086426
+ },
+ "PA": {
+  "state": "PA",
+  "ok": true,
+  "step": "export",
+  "error": "",
+  "seconds": 228.62793612480164
+ },
+ "RI": {
+  "state": "RI",
+  "ok": true,
+  "step": "export",
+  "error": "",
+  "seconds": 5.88410496711731
+ },
+ "SC": {
+  "state": "SC",
+  "ok": true,
+  "step": "export",
+  "error": "",
+  "seconds": 166.02108597755432
+ },
+ "SD": {
+  "state": "SD",
+  "ok": true,
+  "step": "export",
+  "error": "",
+  "seconds": 245.67555022239685
+ },
+ "TN": {
+  "state": "TN",
+  "ok": true,
+  "step": "export",
+  "error": "",
+  "seconds": 200.1088080406189
+ },
+ "TX": {
+  "state": "TX",
+  "ok": true,
+  "step": "export",
+  "error": "",
+  "seconds": 2303.0233080387115
+ },
+ "UT": {
+  "state": "UT",
+  "ok": true,
+  "step": "export",
+  "error": "",
+  "seconds": 187.5726399421692
+ },
+ "VT": {
+  "state": "VT",
+  "ok": true,
+  "step": "export",
+  "error": "",
+  "seconds": 45.219645977020264
+ },
+ "VA": {
+  "state": "VA",
+  "ok": true,
+  "step": "export",
+  "error": "",
+  "seconds": 195.77878308296204
+ },
+ "WA": {
+  "state": "WA",
+  "ok": true,
+  "step": "export",
+  "error": "",
+  "seconds": 19.937636137008667
+ },
+ "WV": {
+  "state": "WV",
+  "ok": true,
+  "step": "export",
+  "error": "",
+  "seconds": 7.513972043991089
+ },
+ "WI": {
+  "state": "WI",
+  "ok": true,
+  "step": "export",
+  "error": "",
+  "seconds": 357.40003204345703
+ },
+ "WY": {
+  "state": "WY",
+  "ok": true,
+  "step": "export",
+  "error": "",
+  "seconds": 8.344048261642456
+ }
+}

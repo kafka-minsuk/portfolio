@@ -117,6 +117,9 @@ def commuting_gravity(flows, t, mask=None, **kw) -> GravityFit:
     mask = np.ones(flows.shape, bool) if mask is None else np.asarray(mask, bool)
     mask = _active(flows, mask)
     i, j = np.nonzero(mask)
+    if i.size == 0:  # e.g. Arizona: no two counties within 60 minutes of each other
+        nan = float("nan")
+        return GravityFit(nan, nan, nan, nan, 0, 0, nan, SolveInfo(False, 0, nan, "not identified: no pairs in the sample"))
     oi = np.unique(i, return_inverse=True)[1]
     dj = np.unique(j, return_inverse=True)[1]
     D = np.eye(dj.max() + 1)[dj]

@@ -191,7 +191,12 @@ def overid_runs(cal0, cal, p0, p, counties, cdf, usd, pub) -> dict:
     out = {}
     for label, c, q in (("theta_T = 0.40 (default)", cal0, p0), (f"theta_T = {p.theta_T:.3f} (estimated)", cal, p)):
         model = checks.rent_usd_per_acre(c.baseline.within.rho[counties], usd)
-        o = checks.overid(model[pub], obs[pub], TF[pub])
+        if pub.sum() < 3:  # e.g. Rhode Island: no county publishes a rent, so there is nothing to test
+            nan = float("nan")
+            o = dict.fromkeys(("corr", "corr_log", "slope", "intercept", "slope_log", "level_ratio", "median_ratio", "sd_log_ratio"), nan)
+            o |= {"n": int(pub.sum()), "outliers": np.array([], int), "log_ratio": np.array([])}
+        else:
+            o = checks.overid(model[pub], obs[pub], TF[pub])
         o["model"] = model
         o["theta_T"] = q.theta_T
         out[label] = o
@@ -239,7 +244,8 @@ def run(state: str, year: int, raw: Path, ddir: Path, shared: Path = bs.SHARED_R
     obs = cdf["cash_rent_usd_acre"].to_numpy(float)
     TF = cdf["TF"].to_numpy(float)
     bill = cdf["farm_labour_bill_usd"].to_numpy(float)
-    corr_log_farmland = float(np.corrcoef(np.log(bill[pub] / cdf["farmland_census_ha"].to_numpy(float)[pub]), np.log(obs[pub]))[0, 1])
+    corr_log_farmland = (float(np.corrcoef(np.log(bill[pub] / cdf["farmland_census_ha"].to_numpy(float)[pub]), np.log(obs[pub]))[0, 1])
+                         if pub.sum() >= 3 else float("nan"))
     E = cdf["farm_earn_usd"].to_numpy(float)
     accounts = farm_income_accounts(cal, data, counties, usd, E)
 

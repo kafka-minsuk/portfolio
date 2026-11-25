@@ -1,0 +1,17 @@
+{
+  "state": "TX",
+  "year": 2022,
+  "params": {
+    "kappa_lam": {
+      "value": 0.013735701809187945,
+      "se_cluster_origin": 0.0004938204448517127,
+      "source": "PPML on LODES8 OD JT00 2022 county pairs, in-state, off-diagonal, origin + destination FE, OSRM car minutes (urqse.calibrate.run_state)",
+      "verify": true
+    },
+    "theta_T": {
+      "value": 0.08530938853460028,
+      "source": "state rent share: NASS 2022 non-irrigated cash rent x CDL cropland over (that rent bill + farm labour bill wA_obs x HA) (spec \u00a75 step 5); labour bill = BEA farm compensation per farm wage job, 5-year mean, x BEA farm jobs (urqse.data.build_state)",
+      "verify": true
+    }
+  }
+}

@@ -224,3 +224,18 @@ def test_lodes_falls_back_to_the_latest_earlier_year(tmp_path, monkeypatch):
     released.discard("mi_od_aux_JT00_2021")
     with pytest.raises(FileNotFoundError, match="mi aux"):
         rs.lodes_paths("IN", 2022, ["26001"], shared=tmp_path)
+
+
+def test_unroutable_pairs_get_straight_line_time_at_the_routed_speed():
+    d = np.array([[1.0, 60.0, 120.0], [60.0, 1.0, 30.0], [120.0, 30.0, 1.0]])
+    t = np.array([[2.0, 60.0, np.nan], [60.0, 2.0, 30.0], [np.nan, 30.0, 2.0]])  # 1 km/min where routed
+    filled, miss = bs.fill_unroutable(t, d)
+    assert miss.sum() == 2 and filled[0, 2] == pytest.approx(120.0) and filled[2, 0] == pytest.approx(120.0)
+    np.testing.assert_array_equal(filled[~miss], t[~miss])
+
+
+def test_cash_rent_stays_non_irrigated_when_neither_series_exists():
+    cols = ["SOURCE_DESC", "SHORT_DESC", "DOMAIN_DESC", "AGG_LEVEL_DESC", "STATE_ALPHA", "ASD_CODE", "COUNTY_ANSI",
+            "COUNTY_NAME", "YEAR", "REFERENCE_PERIOD_DESC", "VALUE"]  # fmt: skip
+    rent, series = bs.cash_rent(pd.DataFrame([], columns=cols), 2022, "44")
+    assert series == "non-irrigated" and np.isnan(rent["state"]) and rent["county"].empty

@@ -245,9 +245,12 @@ def write_report(r, out_dir: Path):
                         ("median_ratio", "median county ratio model/NASS", 3), ("sd_log_ratio", "s.d. of ln(model/NASS)", 3)):  # fmt: skip
         w(f"| {lab} | {_f(o0[key], d)} | {_f(o1[key], d)} |")
     m0 = o0["model"]
-    w(f"\nNASS rents span {obs[pub].min():.0f} to {obs[pub].max():.0f} $/acre; model rents at theta_T = 0.40 span "
-      f"{m0[pub].min():.0f} to {m0[pub].max():.0f} $/acre. Correlation and log slope do not depend on theta_T "
-      "(it scales every county's rent by the same factor).\n")
+    if not pub.any():
+        w("\nNo county has a published NASS cash rent, so the test has no observations.\n")
+    else:
+        w(f"\nNASS rents span {obs[pub].min():.0f} to {obs[pub].max():.0f} $/acre; model rents at theta_T = 0.40 span "
+          f"{m0[pub].min():.0f} to {m0[pub].max():.0f} $/acre. Correlation and log slope do not depend on theta_T "
+          "(it scales every county's rent by the same factor).\n")
     n(lambda: f"**Level.** At 0.40 the model rent is {o0['level_ratio']:.2f} of NASS. The model wage bill w_A H_A is now the "
       "farm labour bill in dollars (per-worker wage x workers = per-job wage x BEA jobs), so the M2 job scaling no "
       f"longer shrinks it (M3: {o3['level_ratio']:.2f}, {m3['unscaled_ratio']:.2f} without the scaling). At the "

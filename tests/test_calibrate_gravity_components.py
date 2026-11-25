@@ -28,3 +28,9 @@ def test_a_sample_too_small_to_identify_kappa_lam_is_reported_not_estimated():
     mask[0, 1:] = True  # one origin: the short-trip sample of a 3-county state
     fit = commuting_gravity(flows, t, mask)
     assert not fit.info.converged and np.isnan(fit.kappa_lam) and "not identified" in fit.info.method
+
+
+def test_an_empty_sample_is_reported_not_estimated():
+    t = np.full((3, 3), 120.0)
+    fit = commuting_gravity(np.ones((3, 3)), t, t <= 60.0)
+    assert not fit.info.converged and np.isnan(fit.kappa_lam) and fit.n_obs == 0

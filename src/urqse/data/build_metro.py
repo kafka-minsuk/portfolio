@@ -142,10 +142,9 @@ def build_metro(state: str, year: int, raw: Path, out: Path, shared: Path = bs.S
     Zin = len(zones) - 1
     pts = pd.concat([zones.iloc[:Zin][["lat", "lon"]], cen_c.loc[nb, ["lat", "lon"]]])
     t_pts, _, n_calls = bs.osrm_table(pts[["lon", "lat"]].to_numpy(), raw / "osrm")
-    if np.isnan(t_pts).any():
-        raise RuntimeError("OSRM returned unroutable pairs")
     lat, lon = pts["lat"].to_numpy(), pts["lon"].to_numpy()
     d_line = bs.haversine_km(lat[:, None], lon[:, None], lat[None, :], lon[None, :])
+    t_pts, _ = bs.fill_unroutable(t_pts, d_line)
     own_t, own_d, speed = bs.own_trip(zones.iloc[:Zin]["area_km2"].to_numpy(float), t_pts, d_line, Zin)
     is_cty = zones.iloc[:Zin]["nest"].to_numpy() < 0  # counties keep the county build's own trip
     own_t = np.where(is_cty, zones.iloc[:Zin]["own_time_min"].to_numpy(float), own_t)

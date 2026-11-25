@@ -1,12 +1,60 @@
 {
  "regions": [
   {
+   "id": "AL_2022",
+   "label": "Alabama 2022",
+   "counties": 67,
+   "core_label": "Jefferson",
+   "suburbs": 30,
+   "rural": 36
+  },
+  {
+   "id": "AZ_2022",
+   "label": "Arizona 2022",
+   "counties": 15,
+   "core_label": "Maricopa",
+   "suburbs": 7,
+   "rural": 7
+  },
+  {
    "id": "AR_2022",
    "label": "Arkansas 2022",
    "counties": 75,
    "core_label": "Pulaski",
    "suburbs": 16,
    "rural": 58
+  },
+  {
+   "id": "CA_2022",
+   "label": "California 2022",
+   "counties": 58,
+   "core_label": "Los Angeles",
+   "suburbs": 36,
+   "rural": 21
+  },
+  {
+   "id": "CO_2022",
+   "label": "Colorado 2022",
+   "counties": 64,
+   "core_label": "Denver",
+   "suburbs": 16,
+   "rural": 47
+  },
+  {
+   "id": "DE_2022",
+   "label": "Delaware 2022",
+   "counties": 3,
+   "core_label": "New Castle",
+   "suburbs": 1,
+   "rural": 1
+  },
+  {
+   "id": "FL_2022",
+   "label": "Florida 2022",
+   "counties": 67,
+   "core_label": "Miami-Dade",
+   "suburbs": 44,
+   "rural": 22
   },
   {
    "id": "GA_2022",
@@ -33,6 +81,14 @@
    "rural": 65
   },
   {
+   "id": "IN_2022",
+   "label": "Indiana 2022",
+   "counties": 92,
+   "core_label": "Marion",
+   "suburbs": 43,
+   "rural": 48
+  },
+  {
    "id": "IA_2022",
    "label": "Iowa 2022",
    "counties": 99,
@@ -48,6 +104,14 @@
    "core_label": "Johnson",
    "suburbs": 19,
    "rural": 85
+  },
+  {
+   "id": "KY_2022",
+   "label": "Kentucky 2022",
+   "counties": 120,
+   "core_label": "Jefferson",
+   "suburbs": 38,
+   "rural": 81
   },
   {
    "id": "LA_2022",
@@ -72,6 +136,22 @@
    "core_label": "Montgomery",
    "suburbs": 16,
    "rural": 7
+  },
+  {
+   "id": "MA_2022",
+   "label": "Massachusetts 2022",
+   "counties": 14,
+   "core_label": "Middlesex",
+   "suburbs": 10,
+   "rural": 3
+  },
+  {
+   "id": "MI_2022",
+   "label": "Michigan 2022",
+   "counties": 83,
+   "core_label": "Oakland",
+   "suburbs": 29,
+   "rural": 53
   },
   {
    "id": "MN_2022",
@@ -114,6 +194,14 @@
    "rural": 82
   },
   {
+   "id": "NV_2022",
+   "label": "Nevada 2022",
+   "counties": 17,
+   "core_label": "Clark",
+   "suburbs": 4,
+   "rural": 12
+  },
+  {
    "id": "NH_2022",
    "label": "New Hampshire 2022",
    "counties": 10,
@@ -130,12 +218,164 @@
    "rural": 0
   },
   {
+   "id": "NM_2022",
+   "label": "New Mexico 2022",
+   "counties": 33,
+   "core_label": "Bernalillo",
+   "suburbs": 6,
+   "rural": 26
+  },
+  {
+   "id": "NY_2022",
+   "label": "New York 2022",
+   "counties": 62,
+   "core_label": "New York",
+   "suburbs": 36,
+   "rural": 25
+  },
+  {
+   "id": "NC_2022",
+   "label": "North Carolina 2022",
+   "counties": 100,
+   "core_label": "Mecklenburg",
+   "suburbs": 44,
+   "rural": 55
+  },
+  {
+   "id": "ND_2022",
+   "label": "North Dakota 2022",
+   "counties": 53,
+   "core_label": "Cass",
+   "suburbs": 7,
+   "rural": 45
+  },
+  {
+   "id": "OH_2022",
+   "label": "Ohio 2022",
+   "counties": 88,
+   "core_label": "Franklin",
+   "suburbs": 40,
+   "rural": 47
+  },
+  {
+   "id": "OK_2022",
+   "label": "Oklahoma 2022",
+   "counties": 77,
+   "core_label": "Oklahoma",
+   "suburbs": 17,
+   "rural": 59
+  },
+  {
+   "id": "OR_2022",
+   "label": "Oregon 2022",
+   "counties": 36,
+   "core_label": "Multnomah",
+   "suburbs": 14,
+   "rural": 21
+  },
+  {
+   "id": "PA_2022",
+   "label": "Pennsylvania 2022",
+   "counties": 67,
+   "core_label": "Philadelphia",
+   "suburbs": 32,
+   "rural": 34
+  },
+  {
+   "id": "RI_2022",
+   "label": "Rhode Island 2022",
+   "counties": 5,
+   "core_label": "Providence",
+   "suburbs": 4,
+   "rural": 0
+  },
+  {
+   "id": "SC_2022",
+   "label": "South Carolina 2022",
+   "counties": 46,
+   "core_label": "Greenville",
+   "suburbs": 25,
+   "rural": 20
+  },
+  {
+   "id": "SD_2022",
+   "label": "South Dakota 2022",
+   "counties": 66,
+   "core_label": "Minnehaha",
+   "suburbs": 7,
+   "rural": 58
+  },
+  {
+   "id": "TN_2022",
+   "label": "Tennessee 2022",
+   "counties": 95,
+   "core_label": "Davidson",
+   "suburbs": 43,
+   "rural": 51
+  },
+  {
+   "id": "TX_2022",
+   "label": "Texas 2022",
+   "counties": 254,
+   "core_label": "Harris",
+   "suburbs": 85,
+   "rural": 168
+  },
+  {
+   "id": "UT_2022",
+   "label": "Utah 2022",
+   "counties": 29,
+   "core_label": "Salt Lake",
+   "suburbs": 8,
+   "rural": 20
+  },
+  {
+   "id": "VT_2022",
+   "label": "Vermont 2022",
+   "counties": 14,
+   "core_label": "Chittenden",
+   "suburbs": 2,
+   "rural": 11
+  },
+  {
+   "id": "VA_2022",
+   "label": "Virginia 2022",
+   "counties": 105,
+   "core_label": "Fairfax, Fairfax City + Falls Church",
+   "suburbs": 60,
+   "rural": 44
+  },
+  {
+   "id": "WA_2022",
+   "label": "Washington 2022",
+   "counties": 39,
+   "core_label": "King",
+   "suburbs": 18,
+   "rural": 20
+  },
+  {
    "id": "WV_2022",
    "label": "West Virginia 2022",
    "counties": 55,
    "core_label": "Kanawha",
    "suburbs": 19,
    "rural": 35
+  },
+  {
+   "id": "WI_2022",
+   "label": "Wisconsin 2022",
+   "counties": 72,
+   "core_label": "Milwaukee",
+   "suburbs": 26,
+   "rural": 45
+  },
+  {
+   "id": "WY_2022",
+   "label": "Wyoming 2022",
+   "counties": 23,
+   "core_label": "Laramie",
+   "suburbs": 1,
+   "rural": 21
   }
  ]
 }

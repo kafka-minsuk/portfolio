@@ -47,7 +47,7 @@ def write_status(status: dict, year: int):
     ok = [s for s in status.values() if s["ok"]]
     L = [f"# State builds, base year {year}", "",
          f"Updated {dt.date.today().isoformat()} by `python scripts/build_all_states.py {year}`. "
-         f"{len(ok)} of {len(STATES)} states and DC are in the web simulator.", "",
+         f"{len(ok)} of the {len(STATES)} regions (50 states and DC) are in the web simulator.", "",
          "| State | Result | Failed step | Reason |", "|---|---|---|---|"]  # fmt: skip
     for st in sorted(STATES, key=STATE_NAME.get):
         if st in UNSUPPORTED:
