@@ -53,12 +53,35 @@ def neighbor_states(ext_counties) -> tuple:
     return tuple(sorted({bs.FIPS_STATE[f[:2]].lower() for f in ext_counties}))
 
 
+LODES_FALLBACK_YEARS = 3  # a state LODES has not released for the year uses its latest earlier year
+
+
 def lodes_paths(state: str, year: int, ext_counties, shared: Path = bs.SHARED_RAW, download: bool = True) -> list:
+    """OD files for the state and its neighbours. Where LODES has no file for `year` (Michigan has
+    no 2022 release), the latest of the LODES_FALLBACK_YEARS earlier years is used.
+    # VERIFY: commuting in an earlier year stands in for the base year for that state."""
     st = state.lower()
     parts = [(st, "main"), (st, "aux")] + [(nb, "aux") for nb in neighbor_states(ext_counties)]
-    paths = [(LODES_URL.format(st=s, part=part, year=year), shared / "lodes" / f"{s}_od_{part}_JT00_{year}.csv.gz")
-             for s, part in parts]  # fmt: skip
-    return [bs.curl(url, path) if download else path for url, path in paths]
+
+    def path(s, part, y):
+        return shared / "lodes" / f"{s}_od_{part}_JT00_{y}.csv.gz"
+
+    if not download:
+        return [path(s, part, year) for s, part in parts]
+    out = []
+    for s, part in parts:
+        for y in range(year, year - LODES_FALLBACK_YEARS - 1, -1):
+            if path(s, part, y).exists() or bs.url_exists(LODES_URL.format(st=s, part=part, year=y)):
+                out.append(bs.curl(LODES_URL.format(st=s, part=part, year=y), path(s, part, y)))
+                break
+        else:
+            raise FileNotFoundError(f"no LODES {s} {part} file for {year} or the {LODES_FALLBACK_YEARS} years before")
+    return out
+
+
+def lodes_years(paths) -> dict:
+    """{file stem: year} for every LODES file that is not from the base year."""
+    return {p.name: int(p.name.rsplit("_", 1)[1][:4]) for p in paths}
 
 
 def county_flows(paths, fips, ext_counties, zone_of=None) -> np.ndarray:
@@ -153,6 +176,13 @@ def farm_income_accounts(cal, data, counties, usd, E) -> dict:
 CHOSEN_THETA = "farm labour bill wA_obs x HA (chosen; spec §5 literal)"
 M3_THETA = "M3: BEA farm earnings net of owner-operators' land rent (M3 choice)"
 HEADLINE_GRAVITY = "in-state, off-diagonal (headline)"
+# A state too small for the headline (Delaware: 3 counties, 6 pairs for 6 parameters) uses the
+# sample with own-county flows.  # VERIFY: own-county times are the area proxy (report §5).
+FALLBACK_GRAVITY = "in-state, own-county flows included"
+
+
+def chosen_gravity(gravity: dict) -> str:
+    return HEADLINE_GRAVITY if gravity[HEADLINE_GRAVITY].info.converged else FALLBACK_GRAVITY
 
 
 def overid_runs(cal0, cal, p0, p, counties, cdf, usd, pub) -> dict:
@@ -184,9 +214,14 @@ def run(state: str, year: int, raw: Path, ddir: Path, shared: Path = bs.SHARED_R
     ext_counties = bs.neighbor_counties(shp, sf, zones.loc[fips].to_crs(5070).union_all())
 
     # 4. kappa*lam by PPML on LODES
-    flows = county_flows(lodes_paths(state, year, ext_counties, shared), fips, ext_counties, zone_of)
+    lodes = lodes_paths(state, year, ext_counties, shared)
+    lodes_fallback = {k: v for k, v in lodes_years(lodes).items() if v != year}
+    flows = county_flows(lodes, fips, ext_counties, zone_of)
     gravity = gravity_specs(flows, t)
-    kl = gravity[HEADLINE_GRAVITY]
+    used = chosen_gravity(gravity)
+    kl = gravity[used]
+    if not kl.info.converged:
+        raise ValueError(f"{state}: kappa*lam is not identified by the headline or the fallback sample")
 
     # 3. theta_T from rent shares
     earn_mean, earn_years = farm_earnings_mean(files["bea_farm"], state, year, fips)
@@ -231,7 +266,7 @@ def run(state: str, year: int, raw: Path, ddir: Path, shared: Path = bs.SHARED_R
         state=state, year=year, df=df, cdf=cdf, data=data, usd=usd, counties=counties, shp=zones, fips=fips,
         flows=flows, gravity=gravity, theta=theta, theta_hat=theta_hat, earn_years=earn_years,
         p0=p0, p_state=p_state, cal0=cal0, cal=cal, overid=overid, pub=pub, m3=m3, accounts=accounts,
-        corr_log_farmland=corr_log_farmland, ext_counties=ext_counties, neighbor_states=neighbor_states(ext_counties),
+        corr_log_farmland=corr_log_farmland, ext_counties=ext_counties, lodes_fallback=lodes_fallback, gravity_used=used, neighbor_states=neighbor_states(ext_counties),
         earn_2022_over_mean=float(cdf["farm_earn_usd"].sum() / earn_mean.sum()),
     )  # fmt: skip
 
@@ -269,7 +304,7 @@ def save_calibrated(r, path: Path):
 
 
 def write_estimates(r, path: Path):
-    g = r["gravity"][HEADLINE_GRAVITY]
+    g = r["gravity"][r["gravity_used"]]
     est = {
         "state": r["state"],
         "year": r["year"],
@@ -277,8 +312,10 @@ def write_estimates(r, path: Path):
             "kappa_lam": {
                 "value": g.kappa_lam,
                 "se_cluster_origin": g.se_cluster_origin,
-                "source": f"PPML on LODES8 OD JT00 {r['year']} county pairs, in-state, off-diagonal, "
-                "origin + destination FE, OSRM car minutes (urqse.calibrate.run_state)",
+                "source": f"PPML on LODES8 OD JT00 {r['year']} county pairs, "
+                + ("in-state, off-diagonal, " if r["gravity_used"] == HEADLINE_GRAVITY else f"{r['gravity_used']} (headline not identified), ")
+                + "origin + destination FE, OSRM car minutes (urqse.calibrate.run_state)"
+                + (f"; earlier-year LODES files: {', '.join(sorted(r['lodes_fallback']))}" if r.get("lodes_fallback") else ""),
                 "verify": True,
             },
             "theta_T": {
@@ -311,7 +348,7 @@ def main(argv=None):
     if a.snapshot:
         SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
         (SNAPSHOT_DIR / f"{state}_{a.year}.json").write_text(json.dumps(snapshot(r), indent=2) + "\n")
-    print(f"calibrated {state} {a.year}: kappa*lam = {r['gravity'][HEADLINE_GRAVITY].kappa_lam:.4f}, "
+    print(f"calibrated {state} {a.year}: kappa*lam = {r['gravity'][r['gravity_used']].kappa_lam:.4f}, "
           f"theta_T = {r['theta_hat']:.3f}")  # fmt: skip
 
 

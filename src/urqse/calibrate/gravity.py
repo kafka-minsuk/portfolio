@@ -122,6 +122,11 @@ def commuting_gravity(flows, t, mask=None, **kw) -> GravityFit:
     D = np.eye(dj.max() + 1)[dj]
     X = np.column_stack([-t[i, j], np.eye(oi.max() + 1)[oi], D[:, _identified(oi, dj)]])
     y = flows[i, j]
+    if X.shape[0] <= X.shape[1] or np.linalg.matrix_rank(X) < X.shape[1]:
+        # e.g. Delaware's pairs within 60 minutes: one county pair, so kappa*lam is not identified
+        nan = float("nan")
+        info = SolveInfo(False, 0, nan, f"not identified: {X.shape[0]} pairs, {X.shape[1]} parameters")
+        return GravityFit(nan, nan, nan, nan, int(y.size), int((y == 0).sum()), nan, info)
     fit = ppml(y, X, cluster=i, **kw)
     r2 = float(np.corrcoef(y, fit.mu)[0, 1] ** 2)
     return GravityFit(

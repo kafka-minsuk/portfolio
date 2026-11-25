@@ -74,7 +74,7 @@ corr(ln xi_A, ln observed farm wage) = -0.972 (M3: -0.996). With default kappa*l
 
 ## 3. Cash-rent over-identification test (spec §5 step 5)
 
-Model rent rho_j = (theta_T/theta_H) w_Aj H_Aj / T^F_j is in wage units per hectare. In dollars per acre: rho x 82,594 $ x 0.40469 ha/acre. NASS: 2022 county cash rent, non-irrigated cropland. T^F: CDL cropland. The 2 counties whose rent NASS did not publish (filled in M2 with the 'other counties' value) are left out of the statistics.
+Model rent rho_j = (theta_T/theta_H) w_Aj H_Aj / T^F_j is in wage units per hectare. In dollars per acre: rho x 82,594 $ x 0.40469 ha/acre. NASS: 2022 county cash rent, non-irrigated cropland (irrigated in a state that publishes no non-irrigated rent; the county data report says which). T^F: CDL cropland. The 2 counties whose rent NASS did not publish (filled in M2 with the 'other counties' value) are left out of the statistics.
 
 | | theta_T = 0.40 | theta_T estimated |
 |---|---|---|

@@ -146,13 +146,22 @@ def sources(state: str, year: int, tiles: tuple = ()) -> dict:
 # --- downloads -----------------------------------------------------------------------------
 
 
+def url_exists(url: str) -> bool:
+    """HEAD request: True on HTTP 200."""
+    r = subprocess.run(["curl", "-sSfIL", "--retry", "3", "-o", "/dev/null", url], capture_output=True)
+    return r.returncode == 0
+
+
 def curl(url: str, dest: Path) -> Path:
     """Fetch once; an existing file is reused. curl, not urllib, for the macOS certificate store."""
     if dest.exists() and dest.stat().st_size > 0:
         return dest
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = dest.with_name(dest.name + ".part")
-    subprocess.run(["curl", "-sSfL", "--retry", "3", "-o", str(tmp), url], check=True)
+    # Large CDL rasters often break off partway (curl exit 18): retry on any error and resume the
+    # partial file (-C -) instead of starting over; a .part left by an earlier run resumes too.
+    subprocess.run(["curl", "-sSfL", "--retry", "5", "--retry-all-errors", "--retry-delay", "5", "-C", "-",
+                    "-o", str(tmp), url], check=True)  # fmt: skip
     tmp.replace(dest)
     return dest
 
@@ -246,6 +255,20 @@ def read_cenpop(path: Path) -> pd.DataFrame:
     df = pd.read_csv(path, encoding="utf-8-sig", dtype={"STATEFP": str, "COUNTYFP": str})
     df.index = df["STATEFP"] + df["COUNTYFP"]
     return df.rename(columns={"LATITUDE": "lat", "LONGITUDE": "lon", "POPULATION": "cenpop"})[["lat", "lon", "cenpop"]]
+
+
+def county_centres(cen: pd.DataFrame, shp, pep_path: Path, year: int) -> pd.DataFrame:
+    """2020 population centres for every county in the 2022 county file. A county the 2020 file does
+    not have (Connecticut's planning regions, new in 2022) gets its polygon's representative point
+    and its PEP population as the weight.  # VERIFY: geometric stand-in for a population centre."""
+    missing = shp.index.difference(cen.index)
+    if missing.empty:
+        return cen
+    pts = shp.loc[missing].geometry.to_crs(5070).representative_point().to_crs(4326)
+    pep = pd.read_csv(pep_path, encoding="latin-1", dtype=str)
+    pep = pd.Series(to_number(pep[f"POPESTIMATE{year}"]).to_numpy(), index=pep["STATE"] + pep["COUNTY"])
+    add = pd.DataFrame({"lat": pts.y.to_numpy(), "lon": pts.x.to_numpy(), "cenpop": pep.reindex(missing).to_numpy()}, index=missing)
+    return pd.concat([cen, add])
 
 
 def read_counties(path: Path):
@@ -349,6 +372,16 @@ def county_districts(df: pd.DataFrame, state_fips: str) -> pd.Series:
     x = df[(df["AGG_LEVEL_DESC"] == "COUNTY") & df["COUNTY_ANSI"].fillna("").str.fullmatch(r"\d{3}")]
     x = x.drop_duplicates("COUNTY_ANSI")
     return pd.Series(x["ASD_CODE"].to_numpy(), index=state_fips + x["COUNTY_ANSI"])
+
+
+def cash_rent(df: pd.DataFrame, year: int, state_fips: str) -> tuple[dict, str]:
+    """NASS cropland cash rent (nass_series) and which series it is. Non-irrigated, unless the state
+    publishes no non-irrigated rent at all (Arizona, Nevada farm irrigated land): then irrigated.
+    # VERIFY: irrigated rent is well above dryland rent where both exist."""
+    rent = nass_series(df, "RENT, CASH, CROPLAND, NON-IRRIGATED - EXPENSE, MEASURED IN $ / ACRE", year, "SURVEY", state_fips)
+    if np.isfinite(rent["state"]) or not rent["county"].dropna().empty:
+        return rent, "non-irrigated"
+    return nass_series(df, "RENT, CASH, CROPLAND, IRRIGATED - EXPENSE, MEASURED IN $ / ACRE", year, "SURVEY", state_fips), "irrigated"
 
 
 def read_nass(path: Path) -> pd.DataFrame:
@@ -573,7 +606,7 @@ def build(state: str, year: int, raw: Path, out: Path, shared: Path = SHARED_RAW
         read_acs(files["acs_b05005"], {"B05005_E004": "fb_recent"}, sf),
     ], axis=1)  # fmt: skip
     pep = read_pep(files["pep"], sf, year)
-    cen = read_cenpop(files["cenpop"])
+    cen = county_centres(read_cenpop(files["cenpop"]), shp, files["pep"], year)
 
     df = pd.DataFrame(index=pd.Index(fips, name="fips"))
     df["name"] = zones["NAME"]
@@ -613,7 +646,10 @@ def build(state: str, year: int, raw: Path, out: Path, shared: Path = SHARED_RAW
     farmland = nass_series(nass, "FARM OPERATIONS - ACRES OPERATED", 2022, "CENSUS", sf)
     cropland = nass_series(nass, "AG LAND, CROPLAND - ACRES", 2022, "CENSUS", sf)
     value = nass_series(nass, "AG LAND, INCL BUILDINGS - ASSET VALUE, MEASURED IN $ / ACRE", 2022, "CENSUS", sf)
-    rent = nass_series(nass, "RENT, CASH, CROPLAND, NON-IRRIGATED - EXPENSE, MEASURED IN $ / ACRE", year, "SURVEY", sf)
+    rent, rent_series = cash_rent(nass, year, sf)
+    if rent_series == "irrigated":
+        gaps.append(dict(var="cash_rent_usd_acre", fips=sf + "000",
+                         rule="the state publishes no non-irrigated cropland rent; NASS irrigated cropland rent used"))
     df["owned_acres"] = to_zones(owned["county"], zone_of).reindex(fips)
     df["rented_acres"] = to_zones(rented["county"], zone_of).reindex(fips)
     df["farmland_census_ha"] = to_zones(farmland["county"], zone_of).reindex(fips) * ACRE_HA
@@ -642,7 +678,7 @@ def build(state: str, year: int, raw: Path, out: Path, shared: Path = SHARED_RAW
         elif np.isfinite(rent["state"]):
             fill, rule = rent["state"], "NASS state value"
         else:
-            raise ValueError(f"{state}: no NASS {year} non-irrigated cropland cash rent for {df.loc[f, 'name']} or the state")
+            raise ValueError(f"{state}: no NASS {year} {rent_series} cropland cash rent for {df.loc[f, 'name']} or the state")
         df.loc[f, "cash_rent_usd_acre"] = fill
         gaps.append(dict(var="cash_rent_usd_acre", fips=f, rule=f"not published; {rule} = {fill:g} $/acre"))
     for name, s in (("land_value_usd_acre", value), ("owned_acres", owned), ("rented_acres", rented)):
@@ -753,7 +789,7 @@ def build(state: str, year: int, raw: Path, out: Path, shared: Path = SHARED_RAW
         "contract_labor_coa_usd": contract["state"], "farm_comp_usd": bea.loc[st, "farm_comp"] * 1e3,
     }  # fmt: skip
     meta = dict(state=state, year=year, sources=src, nass_file=nass_name, gaps=gaps, official=official,
-                neighbors=nb_fips, osrm_calls=n_calls, speed_km_per_min=speed, cdl_total_ha=cdl_total_ha,
+                neighbors=nb_fips, rent_series=rent_series, osrm_calls=n_calls, speed_km_per_min=speed, cdl_total_ha=cdl_total_ha,
                 scale=jobs["scale"], farm_wage=farm_wage, road_over_line=float(np.median(d_road[:Z, :Z][~np.eye(Z, dtype=bool)] / d_line[:Z, :Z][~np.eye(Z, dtype=bool)])),
                 raw=raw, shared=shared, merged=merged, crs=crs, built=dt.date.today().isoformat())  # fmt: skip
     (out / "REPORT.md").write_text(report(table, t, meta))
@@ -862,7 +898,7 @@ def report(table: pd.DataFrame, t: np.ndarray, meta: dict) -> str:
           f"{_fmt(o['farm_earn_usd'])} $).",
           f"- **omega.** Census of Agriculture 2022 owned / (owned + rented from others) acres in farms. "
           f"State {_fmt(e['omega'], 3)}, county range {_fmt(c['omega'].min(), 3)} to {_fmt(c['omega'].max(), 3)}.",
-          f"- **cash_rent_usd_acre.** NASS Cash Rents Survey {meta['year']}, non-irrigated cropland. State {_fmt(o['cash_rent_usd_acre'])} $/acre.",
+          f"- **cash_rent_usd_acre.** NASS Cash Rents Survey {meta['year']}, {meta['rent_series']} cropland. State {_fmt(o['cash_rent_usd_acre'])} $/acre.",
           f"- **land_value_usd_acre.** Census of Agriculture 2022 estimated market value of land and buildings per acre "
           f"(NASS does not publish annual county land values). State {_fmt(o['land_value_usd_acre'])} $/acre.",
           "- **gateway.** ACS foreign born who entered 2010 or later per resident worker, relative to the state ratio "

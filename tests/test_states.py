@@ -183,3 +183,44 @@ def test_built_iowa_metro_adds_up_to_counties():
     sums = tr.groupby("parent")[["N", "HU", "HA", "L", "TF"]].sum()
     np.testing.assert_allclose(sums, c.loc[sums.index, ["N", "HU", "HA", "L", "TF"]], rtol=1e-10)
     assert m["N"].sum() == pytest.approx(c["N"].sum(), rel=1e-12)
+
+
+# --- overnight fixes: Connecticut neighbours, irrigated rent, LODES year, one-cluster SE ------------
+
+
+def test_county_centres_fill_counties_missing_from_the_2020_file(tmp_path):
+    shp = gpd.GeoDataFrame({"GEOID": ["25001", "09110"]}, geometry=[box(-71, 42, -70, 43), box(-73, 41, -72, 42)],
+                           crs=4326).set_index("GEOID")  # fmt: skip
+    cen = pd.DataFrame({"lat": [42.5], "lon": [-70.5], "cenpop": [1000.0]}, index=["25001"])
+    pep = tmp_path / "pep.csv"
+    pep.write_text("SUMLEV,STATE,COUNTY,POPESTIMATE2022\n050,25,001,1100\n050,09,110,900000\n")
+    out = bs.county_centres(cen, shp, pep, 2022)
+    assert out.loc["25001"].tolist() == [42.5, -70.5, 1000.0]  # the 2020 centre is kept
+    assert out.loc["09110", "cenpop"] == 900000.0
+    assert 41 < out.loc["09110", "lat"] < 42 and -73 < out.loc["09110", "lon"] < -72
+
+
+def test_cash_rent_falls_back_to_irrigated_only_when_the_state_has_no_dryland_rent():
+    cols = ["SOURCE_DESC", "SHORT_DESC", "DOMAIN_DESC", "AGG_LEVEL_DESC", "STATE_ALPHA", "ASD_CODE", "COUNTY_ANSI",
+            "COUNTY_NAME", "YEAR", "REFERENCE_PERIOD_DESC", "VALUE"]  # fmt: skip
+    dry = "RENT, CASH, CROPLAND, NON-IRRIGATED - EXPENSE, MEASURED IN $ / ACRE"
+    wet = "RENT, CASH, CROPLAND, IRRIGATED - EXPENSE, MEASURED IN $ / ACRE"
+    irrigated = [("SURVEY", wet, "TOTAL", "COUNTY", "AZ", "10", "013", "MARICOPA", "2022", "YEAR", "250"),
+                 ("SURVEY", wet, "TOTAL", "STATE", "AZ", "", "", "", "2022", "YEAR", "230")]  # fmt: skip
+    rent, series = bs.cash_rent(pd.DataFrame(irrigated, columns=cols), 2022, "04")
+    assert series == "irrigated" and rent["state"] == 230.0 and rent["county"]["04013"] == 250.0
+    both = irrigated + [("SURVEY", dry, "TOTAL", "STATE", "AZ", "", "", "", "2022", "YEAR", "60")]
+    rent, series = bs.cash_rent(pd.DataFrame(both, columns=cols), 2022, "04")
+    assert series == "non-irrigated" and rent["state"] == 60.0
+
+
+def test_lodes_falls_back_to_the_latest_earlier_year(tmp_path, monkeypatch):
+    released = {"in_od_main_JT00_2022", "in_od_aux_JT00_2022", "mi_od_aux_JT00_2021"}
+    monkeypatch.setattr(bs, "url_exists", lambda url: url.rsplit("/", 1)[1].removesuffix(".csv.gz") in released)
+    monkeypatch.setattr(bs, "curl", lambda url, dest: dest)
+    paths = rs.lodes_paths("IN", 2022, ["26001"], shared=tmp_path)
+    assert [p.name for p in paths] == ["in_od_main_JT00_2022.csv.gz", "in_od_aux_JT00_2022.csv.gz", "mi_od_aux_JT00_2021.csv.gz"]
+    assert rs.lodes_years(paths)["mi_od_aux_JT00_2021.csv.gz"] == 2021
+    released.discard("mi_od_aux_JT00_2021")
+    with pytest.raises(FileNotFoundError, match="mi aux"):
+        rs.lodes_paths("IN", 2022, ["26001"], shared=tmp_path)

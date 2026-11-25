@@ -18,3 +18,13 @@ def test_disconnected_sample_is_identified_per_group():
     np.testing.assert_allclose(fit.kappa_lam, k, rtol=1e-8)
     full = commuting_gravity(flows, t, ~np.eye(Z, dtype=bool))  # connected: same answer as before
     np.testing.assert_allclose(full.kappa_lam, k, rtol=1e-8)
+
+
+def test_a_sample_too_small_to_identify_kappa_lam_is_reported_not_estimated():
+    rng = np.random.default_rng(1)
+    t = 10.0 + 30.0 * rng.random((3, 3))
+    flows = np.exp(3.0 - 0.05 * t)
+    mask = np.zeros((3, 3), bool)
+    mask[0, 1:] = True  # one origin: the short-trip sample of a 3-county state
+    fit = commuting_gravity(flows, t, mask)
+    assert not fit.info.converged and np.isnan(fit.kappa_lam) and "not identified" in fit.info.method

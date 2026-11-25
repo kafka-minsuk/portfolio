@@ -77,7 +77,7 @@ def write_report(r, out_dir: Path):
     (out_dir / map_name).write_text(xi_map_svg(r["shp"], r["fips"], cdf["name"].tolist(), xi, f"{name} {yr}"))
 
     g = r["gravity"]
-    head = g["in-state, off-diagonal (headline)"]
+    head = g[r["gravity_used"]]
     th = r["theta"]
     chosen = th[next(k for k in th if "(chosen" in k)]
     m3 = r["m3"]  # None where BEA farm earnings are not positive in every county
@@ -122,7 +122,7 @@ def write_report(r, out_dir: Path):
     w("## Estimates\n")
     w("| Parameter | Estimate | Default | Note |\n|---|---|---|---|")
     w(f"| kappa*lam (per minute) | **{head.kappa_lam:.4f}** (cluster-origin SE {head.se_cluster_origin:.4f}; "
-      f"robust {head.se_robust:.4f}; plain Poisson {head.se_plain:.5f}) | 0.08 | PPML, in-state county pairs, own-county flows excluded |")
+      f"robust {head.se_robust:.4f}; plain Poisson {head.se_plain:.5f}) | 0.08 | PPML, " + ("in-state county pairs, own-county flows excluded" if r["gravity_used"].endswith("(headline)") else f"{r['gravity_used']}: the headline sample does not identify it") + " |")
     w(f"| kappa*lam with own-county flows | {g['in-state, own-county flows included'].kappa_lam:.4f} "
       f"(cluster SE {g['in-state, own-county flows included'].se_cluster_origin:.4f}) | | own time is the M2 area proxy |")
     w(f"| theta_T, state | **{r['theta_hat']:.3f}** | 0.40 | rent bill / (rent bill + farm labour bill w_A,obs H_A) |")
@@ -234,7 +234,8 @@ def write_report(r, out_dir: Path):
 
     w("## 3. Cash-rent over-identification test (spec §5 step 5)\n")
     w("Model rent rho_j = (theta_T/theta_H) w_Aj H_Aj / T^F_j is in wage units per hectare. In dollars per acre: "
-      f"rho x {usd:,.0f} $ x 0.40469 ha/acre. NASS: 2022 county cash rent, non-irrigated cropland. "
+      f"rho x {usd:,.0f} $ x 0.40469 ha/acre. NASS: 2022 county cash rent, non-irrigated cropland (irrigated in a state that publishes no "
+      "non-irrigated rent; the county data report says which). "
       f"T^F: CDL cropland. The {int((~pub & farm_c).sum())} counties whose rent NASS did not publish (filled in M2 with the "
       "'other counties' value) are left out of the statistics.\n")
     w("| | theta_T = 0.40 | theta_T estimated |\n|---|---|---|")
@@ -292,7 +293,9 @@ def write_report(r, out_dir: Path):
     w(f"LODES8 OD {yr}, JT00 (all jobs), S000, block pairs summed to residence-county x workplace-county. "
       f"Files: `{st.lower()}_od_main`, `{st.lower()}_od_aux` (out-of-state residents working in {st}) and the aux "
       f"files of {', '.join(s.upper() for s in r['neighbor_states'])} ({st} residents working there). "
-      f"Out-of-state blocks count only if they lie in the {len(r['ext_counties'])} counties of the M2 external zone, "
+      + (f"LODES has no {yr} file for some of these, so an earlier year stands in (`# VERIFY`): "
+         + ", ".join(f"`{k}`" for k in sorted(r["lodes_fallback"])) + ". " if r.get("lodes_fallback") else "")
+      + f"Out-of-state blocks count only if they lie in the {len(r['ext_counties'])} counties of the M2 external zone, "
       "whose travel time is the time to the nearest of them; other out-of-state blocks are dropped. "
       f"Total flows used: {flows.sum():,.0f}; in-state {flows[:Zc, :Zc].sum():,.0f}, own-county share "
       f"{own_share:.3f}; external zone row {flows[-1].sum():,.0f}, column {flows[:, -1].sum():,.0f}. "
