@@ -100,7 +100,7 @@
               </label>
             </div>
           </div>
-          <div class="map-wrap"><button id="mapBack" class="map-back" hidden>← State map</button><svg id="map" role="img" aria-label="Map of counties coloured by percent change"></svg></div>
+          <div class="map-wrap"><button id="mapBack" class="map-back" hidden>← State map</button><div class="map-zoom" role="group" aria-label="Map zoom"><button id="zoomIn" title="Zoom in" aria-label="Zoom in">+</button><button id="zoomOut" title="Zoom out" aria-label="Zoom out">−</button><button id="zoomReset" title="Reset zoom" aria-label="Reset zoom" disabled>⟲</button></div><svg id="map" role="img" aria-label="Map of counties coloured by percent change"></svg></div>
           <div class="scrub" id="scrubRow" hidden>
             <button id="playBtn" class="ghost small" title="Play the path">▶</button>
             <input id="scrub" type="range" min="0" max="60" step="1" value="0" aria-label="Period">

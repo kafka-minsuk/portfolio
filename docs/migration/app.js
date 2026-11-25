@@ -462,7 +462,7 @@ function drawMap(r) {
   const px = c => cx + k * c.x, py = c => cy - k * c.y;
 
   const order = d3.range(C.length).sort((a, b) => mv.sizes[b] - mv.sizes[a]);  // small circles on top
-  const g = svg.append("g");
+  const g = svg.append("g").attr("class", "viewport");
   const stroke = { core: [css("--core-ring"), 2.5, null], suburb: [css("--core-ring"), 1.5, "3 2"], rural: [css("--surface"), 1.5, null] };
   g.selectAll("circle.county").data(order).join("circle")
     .attr("class", "county")
@@ -482,12 +482,7 @@ function drawMap(r) {
     g.append("text").attr("class", "label").attr("x", px(C[i])).attr("y", py(C[i]) - Math.max(3, rad(mv.sizes[i])) - 6)
       .attr("text-anchor", "middle").text(C[i].name);
   }
-  // scale bar
-  const km = [10, 20, 25, 50, 100].find(v => v * k > 60) || 100;
-  const sb = svg.append("g").attr("transform", `translate(14,${H - 16})`);
-  sb.append("line").attr("x2", km * k).attr("stroke", css("--text-2")).attr("stroke-width", 1.5);
-  sb.append("text").attr("y", -5).text(`${km} km`);
-
+  enableMapZoom(svg, g, W, H, k, H - 16, `${isReal(r) ? r.region.id : "synthetic"}:${S.zoom}`);
   drawMapLegend(color, mv);
 }
 
@@ -514,7 +509,8 @@ function drawPolygonMap(r, geo, full) {
   const STROKE = { core: ["var(--core-ring)", 2.5], suburb: ["var(--core-ring)", 0.9], rural: ["var(--surface-2)", 0.6] };
   const LAYER = { rural: 0, suburb: 1, core: 2 };  // heavier outlines on top
   const order = [...drawn].sort((a, b) => LAYER[C[a].kind] - LAYER[C[b].kind]);
-  svg.append("g").selectAll("path").data(order).join("path")
+  const vp = svg.append("g").attr("class", "viewport");
+  vp.append("g").selectAll("path").data(order).join("path")
     .attr("class", i => `county poly ${C[i].kind}`).attr("d", pathOf)
     .attr("fill", i => missing(mv.values[i]) ? HATCH : color(mv.values[i]))
     .attr("stroke", i => r.isCity ? "var(--surface-2)" : STROKE[C[i].kind][0])
@@ -534,7 +530,7 @@ function drawPolygonMap(r, geo, full) {
     // county outlines over the tracts
     const cg = S.shapes[r.region.id], cv = full.counties;
     const owners = [...new Set(C.map(z => z.county_index))];
-    svg.append("g").attr("pointer-events", "none").selectAll("path").data(owners).join("path")
+    vp.append("g").attr("pointer-events", "none").selectAll("path").data(owners).join("path")
       .attr("d", k => cg[k].map(poly => poly.map(ring => {
         let d = "";
         for (let j = 0; j < ring.length; j += 2) d += (j ? "L" : "M") + px(ring[j]).toFixed(1) + "," + py(ring[j + 1]).toFixed(1);
@@ -543,26 +539,56 @@ function drawPolygonMap(r, geo, full) {
       .attr("fill", "none").attr("stroke", "var(--core-ring)").attr("stroke-width", k => cv[k].kind === "core" ? 2.5 : 1.2);
     for (const k of owners) {
       const m = C.filter(z => z.county_index === k);
-      svg.append("text").attr("class", "label").attr("text-anchor", "middle")
+      vp.append("text").attr("class", "label").attr("text-anchor", "middle")
         .attr("x", px(d3.mean(m, z => z.x))).attr("y", py(d3.mean(m, z => z.y))).text(cv[k].name);
     }
   } else {
     const core = r.counties.findIndex(c => c.kind === "core");
-    svg.append("text").attr("class", "label").attr("x", px(C[core].x)).attr("y", py(C[core].y) + 4)
+    vp.append("text").attr("class", "label").attr("x", px(C[core].x)).attr("y", py(C[core].y) + 4)
       .attr("text-anchor", "middle").text(r.region.core_label);
     // the next largest metros, labelled at their core county (more would clutter the map)
     for (const m of (r.metros || []).slice(1).sort((a, b) => b.N0 - a.N0).slice(0, 5)) {
       const k = C.findIndex(c => c.name === m.core);
       if (k < 0) continue;
-      svg.append("text").attr("class", "label minor").attr("x", px(C[k].x)).attr("y", py(C[k].y) + 4)
+      vp.append("text").attr("class", "label minor").attr("x", px(C[k].x)).attr("y", py(C[k].y) + 4)
         .attr("text-anchor", "middle").text(m.name.split(/[-,]/)[0]);
     }
   }
-  const km = [25, 50, 100, 200].find(v => v * k > 60) || 200;
-  const sb = svg.append("g").attr("transform", `translate(14,${H - 12})`);
-  sb.append("line").attr("x2", km * k).attr("stroke", css("--text-2")).attr("stroke-width", 1.5);
-  sb.append("text").attr("y", -5).text(`${km} km`);
+  enableMapZoom(svg, vp, W, H, k, H - 12, `${full.region.id}:${S.zoom}`);
   drawMapLegend(color, mv, true, drawn.some(i => missing(mv.values[i])), r.isCity ? "city" : full.city ? "nested" : "");
+}
+
+// Zoom and pan: the + / − / reset buttons, a pinch or ctrl/⌘-scroll, and a drag once zoomed in.
+// Plain scrolling still scrolls the page, and double-click keeps opening the tract view. The zoom
+// survives re-runs of the same view; labels, outlines and the scale bar keep their screen size.
+let mapZoom = null;
+function enableMapZoom(svg, vp, W, H, kmPx, barY, key) {
+  const bar = svg.append("g").attr("class", "scalebar").attr("transform", `translate(14,${barY})`);
+  const line = bar.append("line").attr("stroke", css("--text-2")).attr("stroke-width", 1.5);
+  const label = bar.append("text").attr("y", -5);
+  const labels = vp.selectAll("text.label").each(function () { this.dataset.size = parseFloat(getComputedStyle(this).fontSize); });
+  const zoom = d3.zoom().scaleExtent([1, 16]).extent([[0, 0], [W, H]]).translateExtent([[0, 0], [W, H]])
+    .filter(ev => ev.type === "wheel" ? ev.ctrlKey || ev.metaKey : !ev.button && ev.type !== "dblclick")
+    .on("zoom", ev => {
+      const t = ev.transform;
+      vp.attr("transform", t);
+      labels.style("font-size", function () { return this.dataset.size / t.k + "px"; });
+      const px = kmPx * t.k, km = [1, 2, 5, 10, 20, 25, 50, 100, 200, 500].find(v => v * px > 60) || 500;
+      line.attr("x2", km * px);
+      label.text(`${km} km`);
+      svg.classed("zoomed", t.k > 1);
+      $("zoomReset").disabled = t.k <= 1;
+      S.mapTransform = { key, t };
+    });
+  svg.call(zoom).on("dblclick.zoom", null);
+  mapZoom = { svg, zoom };
+  svg.call(zoom.transform, S.mapTransform?.key === key ? S.mapTransform.t : d3.zoomIdentity);
+}
+function zoomMap(how) {
+  if (!mapZoom) return;
+  const sel = mapZoom.svg.transition().duration(250);
+  if (how === "reset") sel.call(mapZoom.zoom.transform, d3.zoomIdentity);
+  else sel.call(mapZoom.zoom.scaleBy, how === "in" ? 1.6 : 1 / 1.6);
 }
 
 function drawMapLegend(color, mv, polygons = false, hatched = false, nest = "") {
@@ -746,7 +772,10 @@ function togglePlay() {
 function wireView() {
   $("metric").innerHTML = METRICS.map(([k, l]) => `<option value="${k}">${l}</option>`).join("");
   $("metric").addEventListener("change", e => { S.metric = e.target.value; render(); });
-  $("mapBack").addEventListener("click", () => { S.zoom = "state"; hideTip(); render(); });
+  $("zoomIn").addEventListener("click", () => zoomMap("in"));
+$("zoomOut").addEventListener("click", () => zoomMap("out"));
+$("zoomReset").addEventListener("click", () => zoomMap("reset"));
+$("mapBack").addEventListener("click", () => { S.zoom = "state"; hideTip(); render(); });
   addEventListener("keydown", e => { if (e.key === "Escape" && S.zoom === "city") { S.zoom = "state"; render(); } });
   for (const b of document.querySelectorAll(".seg button")) b.addEventListener("click", () => setView(b.dataset.view));
   $("scrub").addEventListener("input", e => setPeriod(Number(e.target.value)));
