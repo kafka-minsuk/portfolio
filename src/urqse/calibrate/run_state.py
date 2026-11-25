@@ -182,7 +182,14 @@ FALLBACK_GRAVITY = "in-state, own-county flows included"
 
 
 def chosen_gravity(gravity: dict) -> str:
-    return HEADLINE_GRAVITY if gravity[HEADLINE_GRAVITY].info.converged else FALLBACK_GRAVITY
+    """The headline sample, or the fallback only when the headline does not identify kappa*lam.
+    A headline fit that is identified but did not converge is an error, not a reason to switch."""
+    head = gravity[HEADLINE_GRAVITY]
+    if head.info.converged:
+        return HEADLINE_GRAVITY
+    if head.info.method.startswith("not identified"):
+        return FALLBACK_GRAVITY
+    raise RuntimeError(f"headline PPML did not converge (residual {head.info.residual_inf:.1e})")
 
 
 def overid_runs(cal0, cal, p0, p, counties, cdf, usd, pub) -> dict:

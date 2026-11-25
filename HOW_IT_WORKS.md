@@ -65,6 +65,23 @@ These are deliberate simplifications. Each is a known limit, not an oversight.
 - The state is closed to domestic migration (η = 0). Only international immigrants arrive, and they currently choose places without regard to size, which over-weights small places. That rule is flagged `# VERIFY`.
 - Tract data inside the metro is the county data split by LODES shares. Wages and land tenure are the county's.
 
+## Data rules for particular states
+
+The same pipeline builds every state. Where a state's data breaks a general rule, the build uses one of these fallbacks, records it in that state's reports, and marks it `# VERIFY` in the code.
+
+| State | Gap in the data | Rule used |
+|---|---|---|
+| Arizona, Nevada | No non-irrigated cropland cash rent | NASS irrigated cropland rent, which is higher than dryland rent where both exist |
+| Rhode Island | No cropland cash rent in any series | The mean state rent of Connecticut and Massachusetts |
+| Michigan, and its neighbours Indiana, Ohio and Wisconsin | No 2022 LODES commuting file for Michigan | The latest earlier year |
+| Washington | No road route to San Juan County (islands) | Straight-line distance at the state's median road speed, which ignores ferry waits |
+| Delaware | Three counties give 6 county pairs for 6 parameters, so the commuting regression cannot identify κλ | The regression sample that adds own-county flows |
+| Massachusetts, New York, Rhode Island | Connecticut's 2022 planning regions are missing from the 2020 population-centre file | The region's polygon centre, weighted by its 2022 population |
+| New Jersey, Rhode Island | Every county is in a metro area | The model runs, and the rural measures are blank |
+| 17 states, from California to Wisconsin | Some counties have no farm jobs | Those counties have no farm sector (spec §3.11) |
+
+`tests/test_all_regions.py` runs every state in the menu with its default scenario. It checks that the calibration reproduces the data and that the solves converge under the page's threshold.
+
 ## What is in the browser
 
 The **Presets** buttons set common scenarios in one click. City presets change the core: a downtown boom or decline, upzoning, a metro transit line, or better city amenities. State presets act everywhere: a farm technology leap or downturn, a highway programme, an immigration wave, or rural revival. A preset sets every shock and keeps the parameters, so you can compare presets under the same assumptions.

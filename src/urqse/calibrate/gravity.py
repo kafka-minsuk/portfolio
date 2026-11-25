@@ -45,7 +45,13 @@ def ppml(y, X, *, cluster=None, tol=1e-10, max_iter=200) -> PPMLFit:
         d = np.linalg.solve((X.T * mu) @ X, score)
         ll0 = loglik(eta)
         for _ in range(40):
-            if loglik(X @ (beta + d)) >= ll0:
+            e_new = X @ (beta + d)
+            ll = loglik(e_new)
+            if ll >= ll0:
+                break
+            # Near the optimum the log-likelihood is flat to float precision (Ohio stalled at 4e-7):
+            # then accept a step that lowers the score residual, as _balance_newton does.
+            if abs(ll - ll0) <= 1e-12 * abs(ll0) and np.max(np.abs(X.T @ (y - np.exp(e_new))) / scale) < res:
                 break
             d = d / 2.0
         beta = beta + d

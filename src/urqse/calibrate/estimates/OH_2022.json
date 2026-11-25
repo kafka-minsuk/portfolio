@@ -3,9 +3,9 @@
   "year": 2022,
   "params": {
     "kappa_lam": {
-      "value": 0.03966447035243551,
-      "se_cluster_origin": 0.0013858407686550287,
-      "source": "PPML on LODES8 OD JT00 2022 county pairs, in-state, own-county flows included (headline not identified), origin + destination FE, OSRM car minutes (urqse.calibrate.run_state); earlier-year LODES files: mi_od_aux_JT00_2021.csv.gz",
+      "value": 0.025660491578331737,
+      "se_cluster_origin": 0.0010101574645626683,
+      "source": "PPML on LODES8 OD JT00 2022 county pairs, in-state, off-diagonal, origin + destination FE, OSRM car minutes (urqse.calibrate.run_state); earlier-year LODES files: mi_od_aux_JT00_2021.csv.gz",
       "verify": true
     },
     "theta_T": {

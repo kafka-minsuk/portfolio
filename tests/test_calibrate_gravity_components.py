@@ -1,6 +1,7 @@
 """PPML gravity on a sample that splits into two groups of counties with no pair between them."""
 
 import numpy as np
+import pytest
 
 from urqse.calibrate.gravity import commuting_gravity
 
@@ -34,3 +35,17 @@ def test_an_empty_sample_is_reported_not_estimated():
     t = np.full((3, 3), 120.0)
     fit = commuting_gravity(np.ones((3, 3)), t, t <= 60.0)
     assert not fit.info.converged and np.isnan(fit.kappa_lam) and fit.n_obs == 0
+
+
+def test_fallback_sample_only_when_the_headline_is_not_identified():
+    from urqse.calibrate import run_state as rs
+    from urqse.calibrate.gravity import GravityFit
+    from urqse.model.equilibrium import SolveInfo
+
+    def fit(ok, method="PPML"):
+        return GravityFit(0.02, 0.0, 0.0, 0.0, 10, 0, 0.9, SolveInfo(ok, 3, 1e-12 if ok else 4e-7, method))
+
+    assert rs.chosen_gravity({rs.HEADLINE_GRAVITY: fit(True)}) == rs.HEADLINE_GRAVITY
+    assert rs.chosen_gravity({rs.HEADLINE_GRAVITY: fit(False, "not identified: 6 pairs, 6 parameters")}) == rs.FALLBACK_GRAVITY
+    with pytest.raises(RuntimeError, match="did not converge"):
+        rs.chosen_gravity({rs.HEADLINE_GRAVITY: fit(False)})
