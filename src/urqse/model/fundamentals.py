@@ -39,14 +39,33 @@ def with_shocks(
     farm_tfp_pct: float = 0.0,
     travel_cut_pct: float = 0.0,
     travel_cut_scope: str = "into_core",
+    core_floor_supply_pct: float = 0.0,
+    core_amenity_pct: float = 0.0,
+    metro_travel_cut_pct: float = 0.0,
+    rural_amenity_pct: float = 0.0,
+    metro=None,
+    rural=None,
 ) -> Fundamentals:
-    """Apply a scenario: non-farm productivity B at the core, gross farm TFP everywhere
-    (A-tilde moves by (1+g)^(1/(a_T+a_H)), §3.4), and a proportional travel-time cut.
-    core: the core county's index, or a boolean mask (its tracts, when it is in a metro nest)."""
+    """Apply a scenario. City side: non-farm productivity B, floor-space supply L_bar (upzoning) and
+    amenities A in the core, and travel time between places inside the metro. State wide: gross farm
+    TFP everywhere (A-tilde moves by (1+g)^(1/(a_T+a_H)), §3.4), a travel-time cut on links into the
+    core or on all links, and amenities in rural counties.
+    core: the core county's index, or a boolean mask (its tracts, when it is in a metro nest).
+    metro, rural: boolean masks, needed only by the shocks that use them."""
     is_core = np.zeros(f.Z, bool)
     is_core[core] = True
+
+    def mask(m, name):
+        if m is None:
+            raise ValueError(f"{name} needs its zones (with_shocks {name.split('_')[0]}=...)")
+        return np.asarray(m, bool)
+
     B = f.B.copy()
     B[is_core] *= 1.0 + core_productivity_pct / 100.0
+    L_bar = f.L_bar * np.where(is_core, 1.0 + core_floor_supply_pct / 100.0, 1.0)
+    A = f.A * np.where(is_core, 1.0 + core_amenity_pct / 100.0, 1.0)
+    if rural_amenity_pct:
+        A = A * np.where(mask(rural, "rural_amenity_pct"), 1.0 + rural_amenity_pct / 100.0, 1.0)
     A_farm = f.A_farm * (1.0 + farm_tfp_pct / 100.0) ** (1.0 / a_TH)
     cut = 1.0 - travel_cut_pct / 100.0
     t = f.t.copy()
@@ -58,4 +77,8 @@ def with_shocks(
         t[is_core[:, None] ^ is_core[None, :]] *= cut
     else:
         raise ValueError(f"travel_cut_scope must be one of {TRAVEL_SCOPES}")
-    return replace(f, B=B, A_farm=A_farm, t=t)
+    if metro_travel_cut_pct:
+        # a transit line inside the metro: trips between two different metro places, not within one
+        m = mask(metro, "metro_travel_cut_pct")
+        t[m[:, None] & m[None, :] & ~np.eye(f.Z, dtype=bool)] *= 1.0 - metro_travel_cut_pct / 100.0
+    return replace(f, B=B, A_farm=A_farm, t=t, L_bar=L_bar, A=A)

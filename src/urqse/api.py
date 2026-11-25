@@ -52,6 +52,10 @@ DEFAULT_SHOCKS = {
     "farm_tfp_pct": 0.0,
     "travel_cut_pct": 0.0,
     "travel_cut_scope": "into_core",
+    "core_floor_supply_pct": 0.0,
+    "core_amenity_pct": 0.0,
+    "metro_travel_cut_pct": 0.0,
+    "rural_amenity_pct": 0.0,
     "immigration_per_period": 0.0,
     "periods": 60,
 }
@@ -136,14 +140,17 @@ def _parse(scenario: dict, doc=None):
             kw[k] = _number(k, v)
     p = Params(**{**_region_params(doc), **kw})
     s = dict(DEFAULT_SHOCKS, **raw_s)
-    for k in ("core_productivity_pct", "farm_tfp_pct", "travel_cut_pct", "immigration_per_period"):
+    PCT = ("core_productivity_pct", "farm_tfp_pct", "travel_cut_pct", "core_floor_supply_pct", "core_amenity_pct",
+           "metro_travel_cut_pct", "rural_amenity_pct")
+    for k in (*PCT, "immigration_per_period"):
         s[k] = _number(k, s[k])
     if s["travel_cut_scope"] not in TRAVEL_SCOPES:
         raise ValueError(f"travel_cut_scope must be one of {TRAVEL_SCOPES}")
-    if not 0.0 <= s["travel_cut_pct"] < 100.0:
-        raise ValueError("travel_cut_pct must be in [0, 100)")
-    if s["core_productivity_pct"] <= -100.0 or s["farm_tfp_pct"] <= -100.0:
-        raise ValueError("productivity shocks must be above -100%")
+    for k in ("travel_cut_pct", "metro_travel_cut_pct"):
+        if not 0.0 <= s[k] < 100.0:
+            raise ValueError(f"{k} must be in [0, 100)")
+    if any(s[k] <= -100.0 for k in ("core_productivity_pct", "farm_tfp_pct", "core_floor_supply_pct", "core_amenity_pct", "rural_amenity_pct")):
+        raise ValueError("productivity, floor-supply and amenity shocks must be above -100%")
     if s["immigration_per_period"] < 0:
         raise ValueError("immigration_per_period must be >= 0")
     periods = s["periods"]
@@ -211,6 +218,12 @@ def run(scenario: dict, region_doc: dict | None = None) -> dict:
         farm_tfp_pct=s["farm_tfp_pct"],
         travel_cut_pct=s["travel_cut_pct"],
         travel_cut_scope=s["travel_cut_scope"],
+        core_floor_supply_pct=s["core_floor_supply_pct"],
+        core_amenity_pct=s["core_amenity_pct"],
+        metro_travel_cut_pct=s["metro_travel_cut_pct"],
+        rural_amenity_pct=s["rural_amenity_pct"],
+        metro=np.isin(data.kind, ("core", "suburb")),
+        rural=R,
     )
     imm = immigration_path(s["immigration_per_period"], T)
 

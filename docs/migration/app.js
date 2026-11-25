@@ -14,8 +14,57 @@ const DEFAULT_SCENARIO = {
   params: { alpha: 0.75, beta: 0.8, lam: 6.8, kappa_lam: 0.08, mu: 0.5, theta_T: 0.40, lam_R: 3.0, nu: 2.0, eta: 0.0,
             price_rent_ratio: 36.0, epsilon: 0.10, varsigma: 0.5, land_income_in_choice: false, lam_M_over_R: 1.0 },
   shocks: { core_productivity_pct: 10.0, farm_tfp_pct: 0.0, travel_cut_pct: 0.0, travel_cut_scope: "into_core",
-            immigration_per_period: 0.0, periods: 60 },
+            immigration_per_period: 0.0, periods: 60, core_floor_supply_pct: 0.0, core_amenity_pct: 0.0,
+            metro_travel_cut_pct: 0.0, rural_amenity_pct: 0.0 },
 };
+
+// Presets: named scenarios that shake the equilibrium from the city side or across the state.
+// A preset sets every shock (the rest go to zero) and keeps the periods and parameters.
+const NO_SHOCK = { core_productivity_pct: 0, farm_tfp_pct: 0, travel_cut_pct: 0, travel_cut_scope: "into_core", immigration_per_period: 0,
+                   core_floor_supply_pct: 0, core_amenity_pct: 0, metro_travel_cut_pct: 0, rural_amenity_pct: 0 };
+const PRESETS = [
+  { group: "City", id: "boom", label: "Downtown boom", shocks: { core_productivity_pct: 15 },
+    help: "Non-farm productivity in the core rises 15%: new firms, a tech cluster. Jobs pull workers in from the countryside." },
+  { group: "City", id: "decline", label: "Downtown decline", shocks: { core_productivity_pct: -10 },
+    help: "Core productivity falls 10%: a big employer leaves. The city sheds jobs and the countryside holds people longer." },
+  { group: "City", id: "upzone", label: "Upzone the core", shocks: { core_floor_supply_pct: 30 },
+    help: "30% more floor space at any rent in the core: zoning reform. Rents fall and the core absorbs more residents." },
+  { group: "City", id: "transit", label: "Metro transit line", shocks: { metro_travel_cut_pct: 25 },
+    help: "Trips between places inside the metro area get 25% faster. Commuting within the city region gets cheaper." },
+  { group: "City", id: "amenity", label: "Better city amenities", shocks: { core_amenity_pct: 10 },
+    help: "Living in the core is 10% more attractive: parks, schools, safety. Residents follow and core rents rise." },
+  { group: "State", id: "farmtech", label: "Farm technology leap", shocks: { farm_tfp_pct: 20 },
+    help: "Farm productivity rises 20% everywhere. Farm wages and land rents rise." },
+  { group: "State", id: "farmbust", label: "Farm downturn", shocks: { farm_tfp_pct: -15 },
+    help: "Farm productivity falls 15%: low prices or drought. Farm incomes fall and rural workers look for city jobs." },
+  { group: "State", id: "highways", label: "Highway programme", shocks: { travel_cut_pct: 20, travel_cut_scope: "all" },
+    help: "Every trip in the state gets 20% faster. More people can live in one county and work in another." },
+  { group: "State", id: "immigration", label: "Immigration wave", shocks: () => ({ immigration_per_period: immigrationWave() }),
+    help: "International arrivals equal to 0.5% of the state's workers every period. Caveat: arrivals do not yet weigh places by size, so too many settle in small rural counties (flagged in the spec)." },
+  { group: "State", id: "rural", label: "Rural revival", shocks: { rural_amenity_pct: 10 },
+    help: "Rural counties become 10% more attractive places to live: broadband, clinics, schools." },
+  { group: "State", id: "twin", label: "City and farm boom", shocks: { core_productivity_pct: 10, farm_tfp_pct: 10 },
+    help: "Core productivity and farm productivity both rise 10%. Which pull wins?" },
+];
+const IMMIGRATION_WAVE_SHARE = 0.005;
+function immigrationWave() {
+  const total = S.result && S.result.counties ? d3.sum(S.result.counties, c => c.N0) : 0;
+  return Math.round((total || 100000) * IMMIGRATION_WAVE_SHARE / 100) * 100;
+}
+
+function applyPreset(id) {
+  const p = PRESETS.find(q => q.id === id);
+  S.scenario.shocks = { ...S.scenario.shocks, ...NO_SHOCK, ...(typeof p.shocks === "function" ? p.shocks() : p.shocks) };
+  S.preset = id;
+  syncControls();
+  requestRun();
+}
+
+function syncPresets() {
+  for (const b of document.querySelectorAll("#presets button")) b.classList.toggle("on", b.dataset.preset === S.preset);
+  const p = PRESETS.find(q => q.id === S.preset);
+  $("presetHelp").textContent = p ? p.help : "Pick a preset, or set the shocks below.";
+}
 
 // ------------------------------------------------------------------ formatting
 const MINUS = "−";
@@ -31,11 +80,18 @@ const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;",
 
 // ------------------------------------------------------------------ controls (one table drives the form)
 const SHOCK_CTL = [
+  { head: "City" },
   { key: "core_productivity_pct", label: "Core productivity shock", min: -20, max: 30, step: 1, fmt: v => pct(v, 0), help: "Non-farm productivity in the core city." },
+  { key: "core_floor_supply_pct", label: "Core floor space (upzoning)", min: -30, max: 100, step: 5, fmt: v => pct(v, 0), help: "Floor space the core supplies at any rent." },
+  { key: "core_amenity_pct", label: "Core amenities", min: -20, max: 30, step: 1, fmt: v => pct(v, 0), help: "How attractive the core is as a place to live." },
+  { key: "metro_travel_cut_pct", label: "Travel-time cut inside the metro", min: 0, max: 50, step: 1, fmt: v => pct(v, 0), help: "Trips between places in the core's metro area (transit)." },
+  { head: "State" },
   { key: "farm_tfp_pct", label: "Farm productivity shock", min: -20, max: 30, step: 1, fmt: v => pct(v, 0), help: "Total factor productivity on every farm." },
   { key: "travel_cut_pct", label: "Travel-time cut", min: 0, max: 50, step: 1, fmt: v => pct(v, 0),
     choice: { key: "travel_cut_scope", options: [["into_core", "Links into the core"], ["all", "All links"]] } },
+  { key: "rural_amenity_pct", label: "Rural amenities", min: -20, max: 30, step: 1, fmt: v => pct(v, 0), help: "How attractive rural counties are as places to live." },
   { key: "immigration_per_period", label: "International immigrants per period", input: "number", min: 0, step: 100, fmt: int, help: "New arrivals settle like residents do." },
+  { head: "Path" },
   { key: "periods", label: "Periods", min: 10, max: 200, step: 5, fmt: int, help: "Length of the adjustment path." },
 ];
 const PARAM_CTL = [
@@ -52,7 +108,7 @@ const PARAM_CTL = [
   { key: "land_income_in_choice", label: "Land income affects where people live", check: true, help: "Off by default: land income is portable wealth." },
 ];
 
-const S = { scenario: structuredClone(DEFAULT_SCENARIO), result: null, view: "long", metric: "dN_pct", period: 0, autoRun: false, geo: {}, shapes: {}, cityShapes: {}, zoom: "state" };
+const S = { scenario: structuredClone(DEFAULT_SCENARIO), result: null, view: "long", metric: "dN_pct", period: 0, autoRun: false, geo: {}, shapes: {}, cityShapes: {}, zoom: "state", preset: null };
 
 // ------------------------------------------------------------------ regions
 const REGION_TEXT = {
@@ -105,6 +161,7 @@ async function setRegion(region) {
     S.scenario = { region, params: { ...DEFAULT_SCENARIO.params, ...d.params }, shocks: { ...DEFAULT_SCENARIO.shocks, ...d.shocks } };
     S.period = 0;
     S.zoom = "state";
+    S.preset = null;
     syncControls();
     requestRun();
   } catch (err) {
@@ -115,6 +172,7 @@ async function setRegion(region) {
 }
 
 function controlHTML(c, group) {
+  if (c.head) return `<h3 class="ctl-head">${c.head}</h3>`;
   const id = `${group}-${c.key}`;
   if (c.check) return `<div class="ctl check"><label><input type="checkbox" id="${id}" data-group="${group}" data-key="${c.key}"> <span>${c.label}${c.help ? `<div class="help">${c.help}</div>` : ""}</span></label></div>`;
   const field = c.input === "number"
@@ -126,6 +184,11 @@ function controlHTML(c, group) {
 }
 
 function buildControls() {
+  const groups = [...new Set(PRESETS.map(p => p.group))];
+  $("presets").innerHTML = groups.map(g => `<div class="preset-row"><span class="muted small">${g}</span>`
+    + PRESETS.filter(p => p.group === g).map(p => `<button type="button" data-preset="${p.id}" title="${esc(p.help)}">${p.label}</button>`).join("")
+    + "</div>").join("");
+  $("presets").addEventListener("click", e => { const b = e.target.closest("button[data-preset]"); if (b) applyPreset(b.dataset.preset); });
   $("shockCtl").innerHTML = SHOCK_CTL.map(c => controlHTML(c, "shocks")).join("");
   $("paramCtl").innerHTML = PARAM_CTL.map(c => controlHTML(c, "params")).join("");
   $("controls").addEventListener("input", e => {
@@ -133,6 +196,7 @@ function buildControls() {
     if (!group) return;
     const v = e.target.type === "checkbox" ? e.target.checked : e.target.type === "radio" ? e.target.value : Number(e.target.value);
     S.scenario[group][key] = v;
+    if (group === "shocks") { S.preset = null; syncPresets(); }  // a hand-set shock is no longer the preset
     syncOutputs();
     if (S.autoRun) scheduleRun();
   });
@@ -142,7 +206,8 @@ function syncControls() {
   syncRegion();
   const nested = !!(REGION_TEXT[S.scenario.region] || {}).tracts;
   for (const c of PARAM_CTL.filter(c => c.nested)) $(`params-${c.key}`).closest(".ctl").hidden = !nested;
-  for (const [group, list] of [["shocks", SHOCK_CTL], ["params", PARAM_CTL]]) for (const c of list) {
+  syncPresets();
+  for (const [group, list] of [["shocks", SHOCK_CTL], ["params", PARAM_CTL]]) for (const c of list.filter(c => c.key)) {
     const el = $(`${group}-${c.key}`), v = S.scenario[group][c.key];
     if (c.check) el.checked = !!v; else el.value = v;
     if (c.choice) for (const r of document.getElementsByName(c.choice.key)) r.checked = r.value === S.scenario[group][c.choice.key];
@@ -151,7 +216,7 @@ function syncControls() {
 }
 
 function syncOutputs() {
-  for (const [group, list] of [["shocks", SHOCK_CTL], ["params", PARAM_CTL]]) for (const c of list) {
+  for (const [group, list] of [["shocks", SHOCK_CTL], ["params", PARAM_CTL]]) for (const c of list.filter(c => c.key)) {
     const out = $(`${group}-${c.key}-out`);
     if (out) out.textContent = c.fmt(S.scenario[group][c.key]);
   }
@@ -293,6 +358,12 @@ function drawTiles(r) {
   if (sh.farm_tfp_pct) parts.push(`farm productivity ${pct(sh.farm_tfp_pct, 0)}`);
   if (sh.travel_cut_pct) parts.push(`travel time ${pct(-sh.travel_cut_pct, 0)} (${sh.travel_cut_scope === "all" ? "all links" : "links into the core"})`);
   if (sh.immigration_per_period) parts.push(`${int(sh.immigration_per_period)} immigrants per period`);
+  if (sh.core_floor_supply_pct) parts.push(`core floor space ${pct(sh.core_floor_supply_pct, 0)}`);
+  if (sh.core_amenity_pct) parts.push(`core amenities ${pct(sh.core_amenity_pct, 0)}`);
+  if (sh.metro_travel_cut_pct) parts.push(`travel time inside the metro ${pct(-sh.metro_travel_cut_pct, 0)}`);
+  if (sh.rural_amenity_pct) parts.push(`rural amenities ${pct(sh.rural_amenity_pct, 0)}`);
+  const preset = PRESETS.find(q => q.id === S.preset);
+  if (preset && parts.length) parts[0] = `${preset.label}: ${parts[0]}`;
   $("scenarioLine").textContent = FIXTURE ? "Sample results" : parts.length ? "Shock: " + parts.join(", ") : "No shock";
 }
 
