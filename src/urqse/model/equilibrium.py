@@ -98,12 +98,16 @@ def commuting_kernels(f: Fundamentals, p: Params):
 
 
 def _evaluate(f, p, D, N, x):
+    """x = (ln r, ln wA). Where a location has no farm sector (§3.11) its ln wA entry is a
+    placeholder: wA, H_A and rho are 0 there."""
     Z = f.Z
-    r, wA = np.exp(x[:Z]), np.exp(x[Z:])
+    farm = blocks.farm_mask(f.xi_A)
+    r = np.exp(x[:Z])
+    wA = np.where(farm, np.exp(x[Z:]), 0.0)
     wU = blocks.nonfarm_wage(f.B, r, p)
-    ln_wtA = x[Z:] + np.log(f.xi_A) + land.choice_wage_markup(f.omega, p)
-    ch = blocks.choice(D, np.log(wU), ln_wtA, N, p.lam)
-    rho = blocks.farm_rent(wA, ch.HA, f.TF, p)
+    ln_wtA = x[Z:] + np.log(np.where(farm, f.xi_A, 1.0)) + land.choice_wage_markup(f.omega, p)
+    ch = blocks.choice(D, np.log(wU), ln_wtA, N, p.lam, farm)
+    rho = np.where(farm, blocks.farm_rent(wA, ch.HA, np.where(farm, f.TF, 1.0), p), 0.0)
     ybar = ch.resident_mean(wU, wA)
     Y = (
         ybar
@@ -116,11 +120,14 @@ def _evaluate(f, p, D, N, x):
 
 def _within_step(f, p, D, D2, N):
     Z = f.Z
-    log_wA_const = np.log(p.theta_H * f.A_farm) + p.theta_T * np.log(f.TF)
+    farm = blocks.farm_mask(f.xi_A)
+    log_wA_const = np.log(p.theta_H * np.where(farm, f.A_farm, 1.0)) + p.theta_T * np.log(np.where(farm, f.TF, 1.0))
 
     def step(x):
         ch, wU, wA, r, rho, ybar, Y, E = _evaluate(f, p, D, N, x)
-        G = np.concatenate([np.log(blocks.floor_rent(E, f.L_bar, p)), log_wA_const - p.theta_T * np.log(ch.HA)])
+        # no farm sector: the ln wA placeholder is a fixed point of G (residual 0)
+        G_A = np.where(farm, log_wA_const - p.theta_T * np.log(np.where(farm, ch.HA, 1.0)), x[Z:])
+        G = np.concatenate([np.log(blocks.floor_rent(E, f.L_bar, p)), G_A])
         res = G - x
         # Diagonal preconditioner from the own-derivatives of G (same fixed points as G).
         sU, sA = ch.own_shares(D2, N)
@@ -146,9 +153,11 @@ def solve_within(f: Fundamentals, p: Params, N, x0, *, tol=TOL_INNER, max_iter=5
 
 
 def seed_x(f: Fundamentals, p: Params, N) -> np.ndarray:
-    """Positive seed: r = 1, wA = theta_H A_farm (TF / (0.1 N))^theta_T."""
-    wA = blocks.farm_wage(f.A_farm, f.TF, 0.1 * N, p)
-    return np.concatenate([np.zeros(f.Z), np.log(wA)])
+    """Positive seed: r = 1, wA = theta_H A_farm (TF / (0.1 N))^theta_T (placeholder 1 where there
+    is no farm sector)."""
+    farm = blocks.farm_mask(f.xi_A)
+    wA = blocks.farm_wage(np.where(farm, f.A_farm, 1.0), np.where(farm, f.TF, 1.0), 0.1 * N, p)
+    return np.concatenate([np.zeros(f.Z), np.where(farm, np.log(wA), 0.0)])
 
 
 # --- long run (residence + semi-closure) -------------------------------------------------
@@ -182,7 +191,8 @@ def solve_static(
     N0 = np.full(f.Z, N_bar_base / f.Z) if N0 is None else np.asarray(N0, float)
     warm = {"x": seed_x(f, p, N0) if x0 is None else np.asarray(x0, float)}
     psi = float(np.mean(blocks.congestion_elasticities(p)))
-    pre_dev, pre_level = 1.0 + p.lam_R * psi, 1.0 + p.eta * psi
+    nested = f.nest is not None and bool(np.any(np.asarray(f.nest) >= 0))
+    pre_dev, pre_level = 1.0 + (p.lam_M if nested else p.lam_R) * psi, 1.0 + p.eta * psi
     lnU_bar = np.log(f.U_bar)
 
     def step(y):
@@ -190,8 +200,8 @@ def solve_static(
         if not w.info.converged:
             return np.full_like(y, np.nan), np.full_like(y, np.nan)
         warm["x"] = w.x
-        lnW = blocks.log_welfare(w.lnu, p.lam_R)
-        y_new = np.log(N_bar_base) + p.eta * (lnW - lnU_bar) + blocks.residence_log_shares(w.lnu, p.lam_R)
+        lnW = blocks.log_welfare(w.lnu, p.lam_R, f.nest, p.lam_M)
+        y_new = np.log(N_bar_base) + p.eta * (lnW - lnU_bar) + blocks.residence_log_shares(w.lnu, p.lam_R, f.nest, p.lam_M)
         res = y_new - y
         level = res.mean()
         return y + (res - level) / pre_dev + level / pre_level, res
@@ -199,7 +209,7 @@ def solve_static(
     y, info = anderson(step, np.log(N0), tol=tol, max_iter=max_iter, method="outer anderson(m=6), inner warm-started")
     N = np.exp(y)
     w = solve_within(f, p, N, warm["x"], tol=tol_inner)
-    lnW = blocks.log_welfare(w.lnu, p.lam_R)
+    lnW = blocks.log_welfare(w.lnu, p.lam_R, f.nest, p.lam_M)
     converged = info.converged and w.info.converged
     info = SolveInfo(converged, info.iterations, max(info.residual_inf, w.info.residual_inf), info.method)
     return Equilibrium(N, w, lnW, float(N.sum()), info)

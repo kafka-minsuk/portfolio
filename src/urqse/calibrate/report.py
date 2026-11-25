@@ -10,6 +10,7 @@ from ..data.build_state import STATE_NAME
 
 SURFACE, INK, INK_2, MID = "#fcfcfb", "#0b0b0b", "#52514e", "#f0efec"
 LOW, HIGH = "#2a78d6", "#e34948"  # diverging poles (dataviz reference palette)
+NO_FARM = "#c9c8c4"  # counties without a farm sector (spec §3.11)
 BREAKS = np.array([-1.0, -0.5, -0.2, 0.2, 0.5, 1.0])  # ln(xi_A / state median)
 
 
@@ -32,13 +33,14 @@ def xi_map_svg(shp, fips, names, xi, title="", width=760) -> str:
     x0, y0, x1, y1 = g.total_bounds
     k = (width - 40) / (x1 - x0)
     h = (y1 - y0) * k
-    dev = np.log(xi / np.median(xi))
-    bins = np.digitize(dev, BREAKS)
+    dev = np.log(xi / np.nanmedian(xi))
+    bins = np.where(np.isfinite(dev), np.digitize(np.nan_to_num(dev), BREAKS), -1)  # -1: no farm sector
     paths = []
     for geom, f, nm, v, b in zip(g, fips, names, xi, bins):
         polys = getattr(geom, "geoms", [geom])
         d = "".join(_ring(p.exterior.coords, x0, y1, k) for p in polys)
-        paths.append(f'<path d="{d}" fill="{BIN_COLORS[b]}"><title>{escape(nm)} ({f}): xi_A = {v:.3f}</title></path>')
+        fill, tip = (NO_FARM, "no farm sector") if b < 0 else (BIN_COLORS[b], f"xi_A = {v:.3f}")
+        paths.append(f'<path d="{d}" fill="{fill}"><title>{escape(nm)} ({f}): {tip}</title></path>')
     labels = ["< -1.0", "-1.0 to -0.5", "-0.5 to -0.2", "-0.2 to 0.2", "0.2 to 0.5", "0.5 to 1.0", "> 1.0"]
     sw = (width - 40) / 7
     legend = "".join(
@@ -50,8 +52,9 @@ def xi_map_svg(shp, fips, names, xi, title="", width=760) -> str:
         f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {h + 110:.0f}" font-family="system-ui, sans-serif">'
         f'<rect width="100%" height="100%" fill="{SURFACE}"/>'
         f'<text x="20" y="22" font-size="15" font-weight="600" fill="{INK}">Farm-job wedge xi_A by county, {escape(title)}</text>'
-        f'<text x="20" y="40" font-size="12" fill="{INK_2}">ln(xi_A / state median {np.median(xi):.3f}); '
-        f"blue = farm jobs less attractive than their paid wage implies, relative to the median county</text>"
+        f'<text x="20" y="40" font-size="12" fill="{INK_2}">ln(xi_A / state median {np.nanmedian(xi):.3f}); '
+        f"blue = farm jobs less attractive than their paid wage implies, relative to the median county"
+        f"{'; grey = no farm sector' if np.isnan(xi).any() else ''}</text>"
         f'<g transform="translate(20,50)" stroke="{SURFACE}" stroke-width="1">{"".join(paths)}</g>{legend}</svg>\n'
     )
 
@@ -66,7 +69,8 @@ def write_report(r, out_dir: Path):
     c = r["counties"]
     cdf = r["cdf"]
     f0, f = r["cal0"].fundamentals, r["cal"].fundamentals
-    xi = f.xi_A[c]
+    farm_c = r["data"].HA[c] > 0
+    xi = np.where(farm_c, f.xi_A[c], np.nan)  # NaN: no farm sector (spec §3.11)
     map_name = f"{st}_{yr}_xi_A.svg"
     name = STATE_NAME.get(st, st)
     iowa = st == "IA"  # the interpretive paragraphs were written for Iowa's numbers; other states get the tables
@@ -122,7 +126,7 @@ def write_report(r, out_dir: Path):
     w(f"| kappa*lam with own-county flows | {g['in-state, own-county flows included'].kappa_lam:.4f} "
       f"(cluster SE {g['in-state, own-county flows included'].se_cluster_origin:.4f}) | | own time is the M2 area proxy |")
     w(f"| theta_T, state | **{r['theta_hat']:.3f}** | 0.40 | rent bill / (rent bill + farm labour bill w_A,obs H_A) |")
-    w(f"| theta_T, county median (IQR) | {np.median(th_c):.3f} ({np.percentile(th_c, 25):.3f} to {np.percentile(th_c, 75):.3f}) | | same definition |")
+    w(f"| theta_T, county median (IQR) | {np.nanmedian(th_c):.3f} ({np.nanpercentile(th_c, 25):.3f} to {np.nanpercentile(th_c, 75):.3f}) | | same definition |")
     w(f"| over-ID corr(model rho, NASS rent) | {o0['corr']:.3f} (logs {o0['corr_log']:.3f}) | | {o0['n']} published counties |")
     w(f"| over-ID level ratio model/NASS | {o0['level_ratio']:.3f} at theta_T = 0.40; {o1['level_ratio']:.3f} at {r['theta_hat']:.3f} | | farmland-weighted |\n")
     w(f"The {name} parameter set is `urqse.calibrate.run_state.state_params('{st}', {yr})`: `Params()` with "
@@ -205,12 +209,15 @@ def write_report(r, out_dir: Path):
       "wage equals 1, so read it relative to the non-farm wedge of 1.\n")
     w("| Group | counties | median xi_A | min | max |\n|---|---|---|---|---|")
     for k in ("core", "suburb", "rural"):
-        m = kind == k
+        m = (kind == k) & farm_c
         if not m.any():
             continue
         w(f"| {k} | {m.sum()} | {np.median(xi[m]):.3f} | {xi[m].min():.3f} | {xi[m].max():.3f} |")
-    w(f"| all | {Zc} | {np.median(xi):.3f} | {xi.min():.3f} | {xi.max():.3f} |\n")
-    r_xi = float(np.corrcoef(np.log(xi), np.log(wA_usd))[0, 1])
+    w(f"| all with a farm sector | {int(farm_c.sum())} | {np.nanmedian(xi):.3f} | {np.nanmin(xi):.3f} | {np.nanmax(xi):.3f} |\n")
+    if not farm_c.all():
+        w(f"{int((~farm_c).sum())} counties have no farm sector (spec §3.11) and no xi_A: "
+          f"{', '.join(names[~farm_c])}.\n")
+    r_xi = float(np.corrcoef(np.log(xi[farm_c]), np.log(wA_usd[farm_c]))[0, 1])
     n(lambda: f"corr(ln xi_A, ln observed farm wage) = {r_xi:.3f} (M3: "
       f"{np.corrcoef(np.log(xi3), np.log(wA_old))[0, 1]:.3f}). With default kappa*lam = 0.08 the median is "
       f"{np.median(f0.xi_A[c]):.3f}; xi_A depends on kappa*lam through the effective wages, not on theta_T. The "
@@ -228,7 +235,7 @@ def write_report(r, out_dir: Path):
     w("## 3. Cash-rent over-identification test (spec §5 step 5)\n")
     w("Model rent rho_j = (theta_T/theta_H) w_Aj H_Aj / T^F_j is in wage units per hectare. In dollars per acre: "
       f"rho x {usd:,.0f} $ x 0.40469 ha/acre. NASS: 2022 county cash rent, non-irrigated cropland. "
-      f"T^F: CDL cropland. The {int((~pub).sum())} counties whose rent NASS did not publish (filled in M2 with the "
+      f"T^F: CDL cropland. The {int((~pub & farm_c).sum())} counties whose rent NASS did not publish (filled in M2 with the "
       "'other counties' value) are left out of the statistics.\n")
     w("| | theta_T = 0.40 | theta_T estimated |\n|---|---|---|")
     for key, lab, d in (("corr", "correlation (levels)", 3), ("corr_log", "correlation (logs)", 3),
@@ -271,8 +278,8 @@ def write_report(r, out_dir: Path):
       "BEA earnings is no longer needed. The rows below it are sensitivities and the M3 definitions.\n")
     w("| Labour bill | state theta_T | county median | p10 | p90 | min | max |\n|---|---|---|---|---|---|---|")
     for lab, v in th.items():
-        q = np.percentile(v["county"], [50, 10, 90])
-        w(f"| {lab} | {v['state']:.3f} | {q[0]:.3f} | {q[1]:.3f} | {q[2]:.3f} | {v['county'].min():.3f} | {v['county'].max():.3f} |")
+        q = np.nanpercentile(v["county"], [50, 10, 90])
+        w(f"| {lab} | {v['state']:.3f} | {q[0]:.3f} | {q[1]:.3f} | {q[2]:.3f} | {np.nanmin(v['county']):.3f} | {np.nanmax(v['county']):.3f} |")
     e0, e1 = r["earn_years"]
     n(lambda: f"\n**Choice:** state theta_T = **{r['theta_hat']:.3f}** vs the 0.40 default and {m3['p'].theta_T:.3f} in M3. "
       f"{int((th_c > 1).sum())} counties exceed 1 (M3: {int((th3['county'] > 1).sum())}). The single-year row uses {yr} "
@@ -353,6 +360,9 @@ def write_report(r, out_dir: Path):
       "|---|---|---|---|---|---|---|---|---|---|---|---|")
     for j in range(Zc):
         star = "" if pub[j] else "*"
+        if not farm_c[j]:
+            w(f"| {r['fips'][j]} | {names[j]} | {kind[j]} | no farm sector | | | | | | | | {N[j]:,.0f} |")
+            continue
         w(f"| {r['fips'][j]} | {names[j]} | {kind[j]} | {xi[j]:.3f} | {xi3[j]:.3f} | {obs[j]:.0f}{star} | {m0[j]:.0f} | "
           f"{m0[j] / obs[j]:.2f} | {th_c[j]:.3f} | {wA_usd[j]:,.0f} | {wA_old[j]:,.0f} | {N[j]:,.0f} |")
     (out_dir / f"{st}_{yr}_CALIBRATION.md").write_text("\n".join(L) + "\n")

@@ -13,9 +13,17 @@ shape (Z = counties + the external zone, which is last and has kind "external"):
     counties           columns of length Z: fips, name, kind (core|suburb|rural|external), x_km,
                        y_km, N, HU, HA, L, TF (ha), wA_obs (wage units), omega, gateway
     t_min, dist_km     Z x Z travel time (minutes) and distance (km), residence rows
-    geometry           Z entries for the map only (not read here): a list of polygons, each a list
+    geometry           entries for the map only (not read here): a list of polygons, each a list
                        of rings [x0, y0, x1, y1, ...] in km in the x_km / y_km frame; null for the
-                       external zone
+                       external zone. One per county (Z, or C with a metro nest)
+
+A region with a metro nest (spec §3.12, urqse.data.build_metro) has census tracts among its zones:
+    counties.nest      Z ints: 0 = a tract of the metro nest, -1 = a county or the external zone
+    counties.parent    Z FIPS: a tract's county (a county's own FIPS; "EXT")
+    county_view        the state map's units, C = distinct parents in order of first appearance:
+                       fips, name, kind, x_km, y_km
+    city               geometry: one entry per nest zone, in zone order (the tract map)
+run() then reports the state view summed to counties in the usual fields and the tracts under "city".
 """
 
 import math
@@ -37,7 +45,7 @@ REGION_FORMAT = 1
 
 SCENARIO_PARAMS = (
     "alpha", "beta", "lam", "kappa_lam", "mu", "theta_T", "lam_R", "nu", "eta",
-    "price_rent_ratio", "epsilon", "varsigma", "land_income_in_choice",
+    "price_rent_ratio", "epsilon", "varsigma", "land_income_in_choice", "lam_M_over_R",
 )  # fmt: skip
 DEFAULT_SHOCKS = {
     "core_productivity_pct": 10.0,
@@ -80,13 +88,15 @@ def county_data(doc: dict) -> CountyData:
     c = doc["counties"]
     col = lambda k: np.asarray(c[k], dtype=float)  # noqa: E731
     kind = np.asarray(c["kind"], dtype=str)
-    if np.count_nonzero(kind == "core") != 1:
+    nest = np.asarray(c["nest"], int) if "nest" in c else None
+    cores = {p for p, k in zip(c.get("parent", c["fips"]), kind) if k == "core"}
+    if len(cores) != 1:
         raise ValueError("a region needs exactly one core county")
     return CountyData(
         names=list(c["name"]), kind=kind, x=col("x_km"), y=col("y_km"), N=col("N"), HU=col("HU"),
         HA=col("HA"), L=col("L"), TF=col("TF"), wA_obs=col("wA_obs"), mean_nonfarm_wage=1.0,
         omega=col("omega"), gateway=col("gateway"), dist=np.asarray(doc["dist_km"], float),
-        t=np.asarray(doc["t_min"], float),
+        t=np.asarray(doc["t_min"], float), nest=nest,
     )  # fmt: skip
 
 
@@ -165,7 +175,9 @@ def _json(v):
 
 
 def _pct(new, old):
-    return 100.0 * (np.asarray(new) / np.asarray(old) - 1.0)
+    """Percent change; NaN (null in JSON) where old is 0, e.g. farm values without a farm sector."""
+    with np.errstate(divide="ignore", invalid="ignore"):
+        return 100.0 * (np.asarray(new) / np.asarray(old) - 1.0)
 
 
 def _merge(infos, method) -> dict:
@@ -185,7 +197,7 @@ def run(scenario: dict, region_doc: dict | None = None) -> dict:
         raise ValueError("scenario must be an object with 'params' and 'shocks'")
     data, doc = _region(scenario, region_doc)
     p, s = _parse(scenario, doc)
-    R, core, T = data.rural, data.core, s["periods"]
+    R, core, T = data.rural, data.core_mask, s["periods"]  # core: the core county's zone(s)
     urban = ~R
 
     cal = calibrate(data, p)
@@ -207,12 +219,13 @@ def run(scenario: dict, region_doc: dict | None = None) -> dict:
     lr = solve_static(f1, p, N_bar_base=N_bar_lr, N0=base.N * N_bar_lr / f0.N_bar0, x0=w0.x)
     w1 = lr.within
     TF = f0.TF
+    L0 = f0.L_bar * w0.r**p.mu
     totals = {
         "rural_residents_pct": _pct(lr.N[R].sum(), base.N[R].sum()),
         "land_per_farm_worker_pct": _pct(w0.HA[R].sum(), w1.HA[R].sum()),
         "farm_wage_pct": _pct((w1.wA * w0.HA)[R].sum(), (w0.wA * w0.HA)[R].sum()),
         "farmland_rent_pct": _pct((w1.rho * TF)[R].sum(), (w0.rho * TF)[R].sum()),
-        "core_rent_pct": _pct(w1.r[core], w0.r[core]),
+        "core_rent_pct": _pct(w1.r[core] @ L0[core], w0.r[core] @ L0[core]),  # floor-space weighted
         "region_pop_pct": _pct(lr.N_bar, base.N_bar),
     }
 
@@ -223,7 +236,6 @@ def run(scenario: dict, region_doc: dict | None = None) -> dict:
     rho_t, r_t, wA_t = path.stack("rho"), path.stack("r"), path.stack("wA")
     P = np.vstack([w0.rho * land.gordon_multiple(q), land.present_values(rho_t[1:], q)])
     farmland_index = (P[:, R] @ TF[R]) / (P[0, R] @ TF[R])
-    L0 = f0.L_bar * w0.r**p.mu
     urban_index = (r_t[:, urban] @ L0[urban]) / (r_t[0, urban] @ L0[urban])
 
     # Wealth of a baseline rural farm operator at t = 1: owned land at its price plus the PV of
@@ -231,7 +243,8 @@ def run(scenario: dict, region_doc: dict | None = None) -> dict:
     acres = (f0.omega * TF)[R].sum() / w0.HA[R].sum()
     land_price = lambda P_row: (P_row[R] @ TF[R]) / TF[R].sum()  # noqa: E731
     farm_wage = (wA_t[1:, R] @ w0.HA[R]) / w0.HA[R].sum()
-    core_income = path.stack("ybar")[1:, core]
+    Nc = path.N[1:, core]
+    core_income = (path.stack("ybar")[1:, core] * Nc).sum(axis=1) / Nc.sum(axis=1)  # resident-weighted
     hold = np.ones(T)
 
     def wealth_pct(income, income0):
@@ -284,7 +297,7 @@ def run(scenario: dict, region_doc: dict | None = None) -> dict:
         },
         "wealth": {
             "stayer_pct": wealth_pct(farm_wage, (w0.wA[R] @ w0.HA[R]) / w0.HA[R].sum()),
-            "leaver_pct": wealth_pct(core_income, w0.ybar[core]),
+            "leaver_pct": wealth_pct(core_income, w0.ybar[core] @ base.N[core] / base.N[core].sum()),
         },
         "analytic": {
             "s": two.s,
@@ -296,7 +309,60 @@ def run(scenario: dict, region_doc: dict | None = None) -> dict:
     }
     if doc:
         out.update(_real_units(doc, data, base, lr, R))
+    if doc and data.nest is not None:
+        out = _county_view(out, doc, data, f0, base, lr, path)
     return _json(out)
+
+
+def _county_view(out: dict, doc: dict, data, f0, base, lr, path) -> dict:
+    """A region with a metro nest: the per-zone results move under "city" (its tracts only), and the
+    usual per-county fields are replaced by sums over each county's zones (spec §3.12), so the state
+    map reads them as before. Rates are weighted: farm wage by farm jobs, farmland rent by farmland,
+    floor rent by baseline floor space, owner share by farmland."""
+    c = doc["counties"]
+    cv = doc["county_view"]
+    units = list(cv["fips"])
+    idx = {u: k for k, u in enumerate(units)}
+    member = np.array([idx[pf] for pf in c["parent"]])
+    M = np.zeros((len(units), data.N.size))
+    M[member, np.arange(data.N.size)] = 1.0
+    w0, w1 = base.within, lr.within
+    TF = f0.TF
+
+    def wmean(v, wt):
+        with np.errstate(divide="ignore", invalid="ignore"):
+            return (M @ (v * wt)) / (M @ wt)
+
+    L0 = data.L  # baseline floor space (observed; equals L_bar r0^mu at the calibrated baseline)
+    inside = data.nest >= 0
+    zone_lr = out["long_run"]
+    city = {
+        "zones": [z | {"parent": c["parent"][i], "county_index": int(member[i])} for i, z in enumerate(out["counties"]) if inside[i]],
+        "long_run": {k: np.asarray(zone_lr[k])[inside] for k in ("N", "dN_pct", "wA_pct", "rho_pct", "r_pct", "HA_pct")},
+        "path": {"N": np.asarray(path.N)[:, inside]},
+        "real": {k: np.asarray(v)[inside] for k, v in out["real"].items()} if "real" in out else {},
+    }
+    N0, N1 = M @ base.N, M @ lr.N
+    HA0, HA1 = M @ w0.HA, M @ w1.HA
+    wA0, wA1 = wmean(w0.wA, w0.HA), wmean(w1.wA, w0.HA)
+    rho0, rho1 = wmean(w0.rho, TF), wmean(w1.rho, TF)
+    r0, r1 = wmean(w0.r, L0), wmean(w1.r, L0)
+    out["counties"] = [
+        {"id": k, "name": cv["name"][k], "x": cv["x_km"][k], "y": cv["y_km"][k], "kind": cv["kind"][k],
+         "N0": float((M @ data.N)[k]), "HU0": float((M @ data.HU)[k]), "HA0": float((M @ data.HA)[k]),
+         "TF": float((M @ TF)[k]), "omega": float(wmean(f0.omega, TF)[k]) if (M @ TF)[k] > 0 else float(f0.omega[member == k][0]),
+         "tracts": int((inside & (member == k)).sum())}
+        for k in range(len(units))
+    ]  # fmt: skip
+    out["long_run"] |= {"N": N1, "dN_pct": _pct(N1, N0), "HA_pct": _pct(HA1, HA0), "wA_pct": _pct(wA1, wA0),
+                        "rho_pct": _pct(rho1, rho0), "r_pct": _pct(r1, r0)}  # fmt: skip
+    out["path"]["N"] = np.asarray(path.N) @ M.T
+    if "real" in out:
+        usd, acre = doc["usd_per_wage_unit"], land.HA_PER_ACRE
+        out["real"] = {"fips": units, "TF_acres": (M @ TF) / acre, "rent0_usd_acre": rho0 * usd * acre,
+                       "rent_usd_acre": rho1 * usd * acre, "wA0_usd": wA0 * usd, "wA_usd": wA1 * usd}  # fmt: skip
+    out["city"] = city
+    return out
 
 
 def _real_units(doc, data, base, lr, R) -> dict:

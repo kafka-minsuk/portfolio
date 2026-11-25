@@ -55,12 +55,29 @@ def test_region_defaults_layer_estimates_over_params():
 
 
 def test_region_document_shape():
+    """Iowa carries a metro nest: 94 counties outside Des Moines' metro area, its 162 tracts, the
+    external zone; the state map keeps 99 counties + the external zone."""
     data = api.county_data(DOC)
     Z = len(data.names)
-    assert Z == 100 and data.t.shape == data.dist.shape == (Z, Z)
-    assert data.names[data.core] == "Polk"
-    assert data.kind[-1] == "external" and DOC["geometry"][-1] is None
-    assert len(DOC["geometry"]) == Z and all(g for g in DOC["geometry"][:-1])
+    assert Z == 256 and data.t.shape == data.dist.shape == (Z, Z)
+    assert (data.nest == 0).sum() == 162 and data.names[data.core].endswith("Polk")
+    assert data.kind[-1] == "external"
+    cv = DOC["county_view"]
+    assert len(cv["fips"]) == 100 and cv["name"][cv["kind"].index("core")] == "Polk"
+    assert len(DOC["geometry"]) == 100 and DOC["geometry"][-1] is None and all(g for g in DOC["geometry"][:-1])
+    assert len(DOC["city"]["geometry"]) == 162 and all(DOC["city"]["geometry"])
+
+
+def test_state_view_is_the_sum_of_the_tracts(iowa):
+    city, cv = iowa["city"], iowa["counties"]
+    assert len(cv) == 100 and len(city["zones"]) == 162
+    polk = next(c for c in cv if c["name"] == "Polk")
+    tracts = [i for i, z in enumerate(city["zones"]) if z["county_index"] == polk["id"]]
+    assert polk["tracts"] == len(tracts) == 112
+    assert sum(city["long_run"]["N"][i] for i in tracts) == pytest.approx(iowa["long_run"]["N"][polk["id"]], rel=1e-12)
+    assert sum(city["zones"][i]["N0"] for i in tracts) == pytest.approx(polk["N0"], rel=1e-12)
+    T = len(iowa["path"]["t"])
+    assert len(city["path"]["N"]) == T and len(city["path"]["N"][0]) == 162
 
 
 def test_iowa_default_converges_under_the_web_gate(iowa):
@@ -110,11 +127,12 @@ def test_document_matches_the_built_state():
     """The exported arrays are the built state's, up to the documented travel-matrix rounding."""
     pytest.importorskip("pandas")
     from urqse.calibrate.run_state import state_params
-    from urqse.data.loaders import COUNTY_FILE, load_state, state_dir
+    from urqse.data.loaders import METRO_FILE, load_metro, state_dir
 
-    if not (state_dir("IA", 2022) / COUNTY_FILE).exists():
-        pytest.skip("Iowa data not built")
-    built, doc = load_state("IA", 2022), api.county_data(DOC)
+    if not (state_dir("IA", 2022) / METRO_FILE).exists():
+        pytest.skip("Iowa metro data not built")
+    built, doc = load_metro("IA", 2022), api.county_data(DOC)
+    np.testing.assert_array_equal(doc.nest, built.nest)
     assert built.names == doc.names and list(built.kind) == list(doc.kind)
     for k in ("x", "y", "N", "HU", "HA", "L", "TF", "wA_obs", "omega", "gateway"):
         np.testing.assert_array_equal(getattr(doc, k), getattr(built, k), err_msg=k)

@@ -12,7 +12,7 @@ const START_REGION = "IA_2022";
 const DEFAULT_SCENARIO = {
   region: "synthetic",
   params: { alpha: 0.75, beta: 0.8, lam: 6.8, kappa_lam: 0.08, mu: 0.5, theta_T: 0.40, lam_R: 3.0, nu: 2.0, eta: 0.0,
-            price_rent_ratio: 36.0, epsilon: 0.10, varsigma: 0.5, land_income_in_choice: false },
+            price_rent_ratio: 36.0, epsilon: 0.10, varsigma: 0.5, land_income_in_choice: false, lam_M_over_R: 1.0 },
   shocks: { core_productivity_pct: 10.0, farm_tfp_pct: 0.0, travel_cut_pct: 0.0, travel_cut_scope: "into_core",
             immigration_per_period: 0.0, periods: 60 },
 };
@@ -42,6 +42,8 @@ const PARAM_CTL = [
   { key: "theta_T", label: "Land share in farming θ_T", min: 0.05, max: 0.7, step: 0.01, fmt: v => v.toFixed(2), help: "Higher means more diminishing returns to farm labour." },
   { key: "lam_R", label: "Residence elasticity λ_R", min: 0.5, max: 10, step: 0.1, fmt: v => v.toFixed(1), help: "How strongly residents respond to living standards." },
   { key: "mu", label: "Floor-space supply elasticity μ", min: 0, max: 3, step: 0.05, fmt: v => v.toFixed(2) },
+  { key: "lam_M_over_R", label: "Moving within the metro λ_M / λ_R", min: 1, max: 5, step: 0.1, fmt: v => v.toFixed(1), nested: true,
+    help: "How much more readily people move between tracts than between counties. 1 = the same." },
   { key: "nu", label: "Migration friction ν", min: 0.2, max: 6, step: 0.1, fmt: v => v.toFixed(1), help: "Higher means people relocate more slowly." },
   { key: "eta", label: "Openness to the rest of the country η", min: 0, max: 5, step: 0.1, fmt: v => v.toFixed(1), help: "0 = closed region (the v1 setting)." },
   { key: "epsilon", label: "Consolidation target ε", min: 0.01, max: 0.5, step: 0.01, fmt: v => "+" + Math.round(v * 100) + "%", help: "Stop when farmland per farm worker rises this much." },
@@ -50,7 +52,7 @@ const PARAM_CTL = [
   { key: "land_income_in_choice", label: "Land income affects where people live", check: true, help: "Off by default: land income is portable wealth." },
 ];
 
-const S = { scenario: structuredClone(DEFAULT_SCENARIO), result: null, view: "long", metric: "dN_pct", period: 0, autoRun: false, geo: {}, shapes: {} };
+const S = { scenario: structuredClone(DEFAULT_SCENARIO), result: null, view: "long", metric: "dN_pct", period: 0, autoRun: false, geo: {}, shapes: {}, cityShapes: {}, zoom: "state" };
 
 // ------------------------------------------------------------------ regions
 const REGION_TEXT = {
@@ -63,13 +65,14 @@ const REPORTS = "https://github.com/kafka-minsuk/portfolio/blob/main/reports";
 async function loadRegions() {
   let regions = [];
   try {
-    const res = await fetch("migration/data/regions.json");
+    const res = await fetch("migration/data/regions.json", { cache: "no-cache" });
     if (res.ok) regions = (await res.json()).regions;
   } catch { /* keep the built-in entries */ }
   for (const r of regions) {
     const core = r.core_label.includes("(") ? r.core_label : `${r.core_label} County`;
-    REGION_TEXT[r.id] ??= { sub: `${r.label}, ${r.counties} counties`,
-      help: `Real county data. The core is ${core}; ${r.suburbs} suburbs are the other metro-area counties, ${r.rural} are rural.` };
+    REGION_TEXT[r.id] = { sub: `${r.label}, ${r.counties} counties`, tracts: r.tracts || 0,
+      help: `Real county data. The core is ${core}; ${r.suburbs} suburbs are the other metro-area counties, ${r.rural} are rural.`
+        + (r.tracts ? ` The core's metro area is modelled by its ${r.tracts} census tracts: double-click it on the map.` : "") };
   }
   const opt = (id, text) => `<option value="${id}">${esc(text)}</option>`;
   const states = regions.length ? regions : [{ id: "IA_2022", label: "Iowa 2022", counties: 99 }];
@@ -81,10 +84,11 @@ const isReal = r => !!r.region;  // a real region's result carries region, level
 // The map polygons come from the same region document the worker reads (shape in urqse.api).
 function loadGeo(region) {
   if (region === "synthetic") return Promise.resolve(null);
-  return S.geo[region] ??= fetch(`migration/data/${region}.json`).then(res => {
+  return S.geo[region] ??= fetch(`migration/data/${region}.json`, { cache: "no-cache" }).then(res => {
     if (!res.ok) throw new Error(`Region data migration/data/${region}.json not found (HTTP ${res.status}).`);
     return res.json();
-  }).then(doc => (S.shapes[region] = doc.geometry)).catch(err => { delete S.geo[region]; throw err; });
+  }).then(doc => { S.cityShapes[region] = doc.city ? doc.city.geometry : null; return (S.shapes[region] = doc.geometry); })
+    .catch(err => { delete S.geo[region]; throw err; });
 }
 
 function syncRegion() {
@@ -100,6 +104,7 @@ async function setRegion(region) {
     const [d] = await Promise.all([backend.defaults(region), loadGeo(region)]);
     S.scenario = { region, params: { ...DEFAULT_SCENARIO.params, ...d.params }, shocks: { ...DEFAULT_SCENARIO.shocks, ...d.shocks } };
     S.period = 0;
+    S.zoom = "state";
     syncControls();
     requestRun();
   } catch (err) {
@@ -135,6 +140,8 @@ function buildControls() {
 
 function syncControls() {
   syncRegion();
+  const nested = !!(REGION_TEXT[S.scenario.region] || {}).tracts;
+  for (const c of PARAM_CTL.filter(c => c.nested)) $(`params-${c.key}`).closest(".ctl").hidden = !nested;
   for (const [group, list] of [["shocks", SHOCK_CTL], ["params", PARAM_CTL]]) for (const c of list) {
     const el = $(`${group}-${c.key}`), v = S.scenario[group][c.key];
     if (c.check) el.checked = !!v; else el.value = v;
@@ -313,6 +320,17 @@ function divergingScale(maxAbs) {
   return d3.scaleDiverging(interp).domain([-m, 0, m]).clamp(true);
 }
 
+// A county without a farm sector (spec §3.11) has no farm wage, rent or jobs change: hatched, not "no change".
+const missing = v => v == null || !isFinite(v);
+const HATCH = "url(#noFarmHatch)";
+function addHatch(svg) {
+  const p = svg.append("defs").append("pattern").attr("id", "noFarmHatch").attr("width", 6).attr("height", 6)
+    .attr("patternUnits", "userSpaceOnUse").attr("patternTransform", "rotate(45)");
+  p.append("rect").attr("width", 6).attr("height", 6).attr("fill", css("--surface"));
+  p.append("line").attr("y2", 6).attr("stroke", css("--div-mid")).attr("stroke-width", 3);
+}
+const hatchSwatch = `<span><svg width="18" height="14"><defs><pattern id="noFarmKey" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="var(--surface)"/><line y2="6" stroke="var(--div-mid)" stroke-width="3"/></pattern></defs><rect x="1.5" y="1.5" width="15" height="11" fill="url(#noFarmKey)" stroke="var(--border)"/></svg> No farm sector</span>`;
+
 // The colour scale spans the counties on the map (not the external zone).
 const onMap = r => d3.range(r.counties.length).filter(i => r.counties[i].kind !== "external");
 
@@ -327,12 +345,24 @@ function mapValues(r) {
   return { values: vals, sizes: r.long_run.N, maxAbs: d3.max(drawn, i => Math.abs(vals[i])), label: `${METRICS.find(m => m[0] === S.metric)[1]}, long run vs start` };
 }
 
+// The map shows counties, or (after a double-click on a metro county) the metro's census tracts.
+// Both views carry the same fields, so the drawing and tooltip code reads either.
+function mapView(r) {
+  if (S.zoom !== "city" || !r.city) return r;
+  return { ...r, counties: r.city.zones, long_run: { ...r.long_run, ...r.city.long_run },
+           path: { ...r.path, N: r.city.path.N }, real: r.city.real, isCity: true };
+}
+
 function drawMap(r) {
-  const geo = isReal(r) ? S.shapes[r.region.id] : null;
-  if (geo) return drawPolygonMap(r, geo);
+  if (S.zoom === "city" && !r.city) S.zoom = "state";
+  $("mapBack").hidden = S.zoom !== "city";
+  $("mapTitle").textContent = S.zoom === "city" ? `Census tracts of the metro area (${r.city.zones.length})` : "Counties";
+  const geo = isReal(r) ? (S.zoom === "city" ? S.cityShapes[r.region.id] : S.shapes[r.region.id]) : null;
+  if (geo) return drawPolygonMap(mapView(r), geo, r);
   const svg = d3.select("#map"), node = svg.node();
   const W = node.clientWidth, H = node.clientHeight;
   svg.attr("viewBox", `0 0 ${W} ${H}`).selectAll("*").remove();
+  addHatch(svg);
   const C = r.counties, mv = mapValues(r), color = divergingScale(mv.maxAbs);
   const maxN = d3.max([...r.path.N, r.long_run.N], row => d3.max(row));
   const rMax = Math.max(14, Math.min(28, Math.min(W, H) / 18));
@@ -350,7 +380,7 @@ function drawMap(r) {
     .attr("class", "county")
     .attr("cx", i => px(C[i])).attr("cy", i => py(C[i]))
     .attr("r", i => Math.max(3, rad(mv.sizes[i])))
-    .attr("fill", i => color(mv.values[i]))
+    .attr("fill", i => missing(mv.values[i]) ? HATCH : color(mv.values[i]))
     .attr("stroke", i => stroke[C[i].kind][0]).attr("stroke-width", i => stroke[C[i].kind][1])
     .attr("stroke-dasharray", i => stroke[C[i].kind][2]);
   // generous invisible hit targets
@@ -374,10 +404,11 @@ function drawMap(r) {
 }
 
 // Real regions: county polygons in the x_km / y_km frame, filled by the same diverging scale.
-function drawPolygonMap(r, geo) {
+function drawPolygonMap(r, geo, full) {
   const svg = d3.select("#map"), node = svg.node();
   const W = node.clientWidth, H = node.clientHeight, pad = 12;
   svg.attr("viewBox", `0 0 ${W} ${H}`).selectAll("*").remove();
+  addHatch(svg);
   const C = r.counties, mv = mapValues(r), color = divergingScale(mv.maxAbs), drawn = onMap(r);
   const xs = [Infinity, -Infinity], ys = [Infinity, -Infinity];
   for (const i of drawn) for (const poly of geo[i]) for (const ring of poly) for (let j = 0; j < ring.length; j += 2) {
@@ -397,22 +428,49 @@ function drawPolygonMap(r, geo) {
   const order = [...drawn].sort((a, b) => LAYER[C[a].kind] - LAYER[C[b].kind]);
   svg.append("g").selectAll("path").data(order).join("path")
     .attr("class", i => `county poly ${C[i].kind}`).attr("d", pathOf)
-    .attr("fill", i => color(mv.values[i]))
-    .attr("stroke", i => STROKE[C[i].kind][0]).attr("stroke-width", i => STROKE[C[i].kind][1]).attr("stroke-linejoin", "round")
+    .attr("fill", i => missing(mv.values[i]) ? HATCH : color(mv.values[i]))
+    .attr("stroke", i => r.isCity ? "var(--surface-2)" : STROKE[C[i].kind][0])
+    .attr("stroke-width", i => r.isCity ? 0.5 : STROKE[C[i].kind][1]).attr("stroke-linejoin", "round")
     .on("mouseenter", ev => d3.select(ev.currentTarget).raise())
     .on("mousemove", (ev, i) => showTip(countyTip(r, i), ev))
-    .on("mouseleave", hideTip);
-  const core = r.counties.findIndex(c => c.kind === "core");
-  svg.append("text").attr("class", "label").attr("x", px(C[core].x)).attr("y", py(C[core].y) + 4)
-    .attr("text-anchor", "middle").text(r.region.core_label);
+    .on("mouseleave", hideTip)
+    .on("dblclick", (ev, i) => {
+      ev.preventDefault();
+      hideTip();
+      if (r.isCity) S.zoom = "state";
+      else if (C[i].tracts) S.zoom = "city";
+      else return;
+      drawMap(full);
+    });
+  if (r.isCity) {
+    // county outlines over the tracts
+    const cg = S.shapes[r.region.id], cv = full.counties;
+    const owners = [...new Set(C.map(z => z.county_index))];
+    svg.append("g").attr("pointer-events", "none").selectAll("path").data(owners).join("path")
+      .attr("d", k => cg[k].map(poly => poly.map(ring => {
+        let d = "";
+        for (let j = 0; j < ring.length; j += 2) d += (j ? "L" : "M") + px(ring[j]).toFixed(1) + "," + py(ring[j + 1]).toFixed(1);
+        return d + "Z";
+      }).join("")).join(""))
+      .attr("fill", "none").attr("stroke", "var(--core-ring)").attr("stroke-width", k => cv[k].kind === "core" ? 2.5 : 1.2);
+    for (const k of owners) {
+      const m = C.filter(z => z.county_index === k);
+      svg.append("text").attr("class", "label").attr("text-anchor", "middle")
+        .attr("x", px(d3.mean(m, z => z.x))).attr("y", py(d3.mean(m, z => z.y))).text(cv[k].name);
+    }
+  } else {
+    const core = r.counties.findIndex(c => c.kind === "core");
+    svg.append("text").attr("class", "label").attr("x", px(C[core].x)).attr("y", py(C[core].y) + 4)
+      .attr("text-anchor", "middle").text(r.region.core_label);
+  }
   const km = [25, 50, 100, 200].find(v => v * k > 60) || 200;
   const sb = svg.append("g").attr("transform", `translate(14,${H - 12})`);
   sb.append("line").attr("x2", km * k).attr("stroke", css("--text-2")).attr("stroke-width", 1.5);
   sb.append("text").attr("y", -5).text(`${km} km`);
-  drawMapLegend(color, mv, true);
+  drawMapLegend(color, mv, true, drawn.some(i => missing(mv.values[i])), r.isCity ? "city" : full.city ? "nested" : "");
 }
 
-function drawMapLegend(color, mv, polygons = false) {
+function drawMapLegend(color, mv, polygons = false, hatched = false, nest = "") {
   if (polygons) {
     const sw = (stroke, w) => `<svg width="18" height="14"><rect x="1.5" y="1.5" width="15" height="11" fill="var(--div-mid)" stroke="${stroke}" stroke-width="${w}"/></svg>`;
     const m = color.domain()[2];
@@ -420,8 +478,11 @@ function drawMapLegend(color, mv, polygons = false) {
     $("mapLegend").innerHTML =
       `<span class="ramp"><b>${esc(mv.label)}</b></span>
        <span class="ramp">${pct(-m, m < 10 ? 1 : 0)} <i style="background:linear-gradient(90deg,${stops})"></i> ${pct(m, m < 10 ? 1 : 0)}</span>
-       <span class="kinds"><span>${sw("var(--core-ring)", 2.5)} Core city</span><span>${sw("var(--core-ring)", 0.9)} Suburb (metro county)</span><span>${sw("var(--border)", 0.6)} Rural</span></span>
-       <span>The external zone (out-of-state commuters) is not drawn. It counts in region totals, not in rural totals.</span>`;
+       <span class="kinds"><span>${sw("var(--core-ring)", 2.5)} Core city</span><span>${sw("var(--core-ring)", 0.9)} Suburb (metro county)</span><span>${sw("var(--border)", 0.6)} Rural</span>${hatched ? hatchSwatch : ""}</span>
+       <span>${nest === "city"
+         ? "Census tracts of the core's metro area, with county outlines. Double-click the map or use the back button to return to the state."
+         : (nest === "nested" ? "<b>Double-click the core's metro area to see its census tracts.</b> " : "")
+           + "The external zone (out-of-state commuters) is not drawn. It counts in region totals, not in rural totals."}</span>`;
     return;
   }
   const m = color.domain()[2];
@@ -455,6 +516,7 @@ function countyTip(r, i) {
 
 function realTipRows(r, i, row) {
   const R = r.real;
+  if (r.counties[i].HA0 === 0) return row("Farm sector", "none (no farm jobs)");
   return row("Farmland rent, $ per acre", `${usd(R.rent0_usd_acre[i])} → ${usd(R.rent_usd_acre[i])}`)
     + row("Farm wage, $ a year", `${usd(R.wA0_usd[i])} → ${usd(R.wA_usd[i])}`)
     + row("Farmland", `${int(R.TF_acres[i])} acres (${int(r.counties[i].TF)} ha)`);
@@ -578,6 +640,8 @@ function togglePlay() {
 function wireView() {
   $("metric").innerHTML = METRICS.map(([k, l]) => `<option value="${k}">${l}</option>`).join("");
   $("metric").addEventListener("change", e => { S.metric = e.target.value; render(); });
+  $("mapBack").addEventListener("click", () => { S.zoom = "state"; hideTip(); render(); });
+  addEventListener("keydown", e => { if (e.key === "Escape" && S.zoom === "city") { S.zoom = "state"; render(); } });
   for (const b of document.querySelectorAll(".seg button")) b.addEventListener("click", () => setView(b.dataset.view));
   $("scrub").addEventListener("input", e => setPeriod(Number(e.target.value)));
   $("playBtn").addEventListener("click", togglePlay);

@@ -12,6 +12,9 @@ class Params:
     mu: float = 0.5  # floor-space supply elasticity. source=spec §7 (Baum-Snow & Han 2024)
     theta_T: float = 0.40  # land share of farm value added net of K, X. source=spec §7
     lam_R: float = 3.0  # long-run residence elasticity. source=spec §7
+    # Residence elasticity inside a metro nest relative to lam_R (spec §3.12); >= 1 for a nested
+    # Frechet choice, 1 = the flat choice over counties and tracts.  # VERIFY: no estimate yet
+    lam_M_over_R: float = 1.0
     nu: float = 2.0  # dynamic-logit dispersion; 1/nu is the migration elasticity. source=spec §7
     eta: float = 0.0  # semi-closure; 0 = closed region. source=spec §12 decision 2
     price_rent_ratio: float = 36.0  # farmland price / cash rent. source=spec §3.10 (U.S. cropland 2025)
@@ -34,6 +37,7 @@ class Params:
             "0 < beta < 1": 0.0 < self.beta < 1.0,
             "0 < theta_T < 1": 0.0 < self.theta_T < 1.0,
             "lam_R > 0": self.lam_R > 0.0,
+            "lam_M_over_R >= 1 (nested residence choice, spec §3.12)": self.lam_M_over_R >= 1.0,
             "mu >= 0": self.mu >= 0.0,
             "kappa_lam >= 0": self.kappa_lam >= 0.0,
             "nu > 0": self.nu > 0.0,
@@ -47,6 +51,11 @@ class Params:
         failed = [name for name, ok in checks.items() if not ok]
         if failed:
             raise ValueError("invalid parameters: " + ", ".join(failed))
+
+    @property
+    def lam_M(self) -> float:
+        """Residence elasticity between tracts of a metro nest (spec §3.12)."""
+        return self.lam_M_over_R * self.lam_R
 
     @property
     def theta_H(self) -> float:

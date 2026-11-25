@@ -28,6 +28,11 @@ def _jobs_equal_workers(df):
     return bool(np.isclose(df["N"].sum(), df["HU"].sum() + df["HA"].sum(), rtol=1e-12))
 
 
+def _farm_sector_complete(df):
+    farm = df["HA"] > 0
+    return bool(((df.loc[farm, "wA_obs_usd"] > 0) & (df.loc[farm, "TF"] > 0)).all() and (df.loc[~farm, "wA_obs_usd"] == 0).all())
+
+
 def _one_external(df):
     return int((df["fips"] == EXTERNAL_FIPS).sum()) == 1 and df["fips"].iloc[-1] == EXTERNAL_FIPS
 
@@ -44,10 +49,10 @@ COUNTY_SCHEMA = pa.DataFrameSchema(
         # model inputs (spec §5 'Data per county')
         "N": _model(),  # resident workers
         "HU": _model(),  # non-farm jobs (worker-equivalents)
-        "HA": _model(),  # farm jobs (worker-equivalents)
+        "HA": _model(_nonneg),  # farm jobs (worker-equivalents); 0 = no farm sector (spec §3.11)
         "L": _model(),  # floor space, m^2
-        "TF": _model(),  # farmland in use, hectares
-        "wA_obs_usd": _model(),  # farm labour earnings per farm worker, $ (= farm_labour_bill_usd / HA)
+        "TF": _model(_nonneg),  # farmland in use, hectares
+        "wA_obs_usd": _model(_nonneg),  # farm labour earnings per farm worker, $ (= farm_labour_bill_usd / HA); 0 if HA = 0
         "omega": _model(_share),  # owner-operated share of farmland
         "gateway": _model(_nonneg),  # immigrant gateway weight, state mean 1
         "own_time_min": _model(),
@@ -82,12 +87,24 @@ COUNTY_SCHEMA = pa.DataFrameSchema(
     checks=[
         pa.Check(_jobs_equal_workers, error="jobs must equal resident workers (spec §5)"),
         pa.Check(_one_external, error="exactly one external zone, in the last row"),
+        pa.Check(_farm_sector_complete, error="a zone with farm jobs needs a farm wage and farmland; one without has wage 0"),
     ],
     strict=True,
     ordered=True,
 )
 
 COLUMNS = list(COUNTY_SCHEMA.columns)
+
+# A state with a metro nest (spec §3.12, urqse.data.build_metro): counties outside the metro, the
+# metro's census tracts (11-digit GEOID), and the external zone. nest = 0 for tracts, -1 otherwise;
+# parent = a tract's county (its own FIPS for a county, "EXT" for the external zone).
+METRO_SCHEMA = COUNTY_SCHEMA.update_column(
+    "fips", checks=pa.Check.str_matches(r"^(\d{5}|\d{11}|EXT)$")
+).add_columns({
+    "nest": pa.Column(int, pa.Check.isin([-1, 0])),
+    "parent": pa.Column(str, pa.Check.str_matches(r"^(\d{5}|EXT)$")),
+})  # fmt: skip
+METRO_COLUMNS = list(METRO_SCHEMA.columns)
 
 
 def validate_travel(fips, t, dist):

@@ -57,6 +57,7 @@ Built 2026-11-24 by `python -m urqse.data.build_state NE 2022`. 93 counties plus
 - **land_value_usd_acre.** Census of Agriculture 2022 estimated market value of land and buildings per acre (NASS does not publish annual county land values). State 3,437 $/acre.
 - **gateway.** ACS foreign born who entered 2010 or later per resident worker, relative to the state ratio (mean 1 over workers). `# VERIFY` against spec §12.2 once the arrival block is calibrated. 19 counties have no recent foreign born in the ACS sample (Arthur, Blaine, Cedar, Cherry, Deuel, Dundy, Garden, Garfield, Gosper, Hamilton, Hitchcock, Hooker, Loup, Nance, Nuckolls, Rock, Sherman, Thomas, Valley), so their gateway weight is 0 (log(0) in arrival_shares).
 - **kind.** core = the metropolitan county with the most non-farm jobs (Douglas); suburb = other counties in a Metropolitan Statistical Area (OMB 2023) (10); rural = the rest (82). `# VERIFY` one core for a multi-metro state.
+- **No farm sector** (spec §3.11): 0 counties have no BEA farm jobs.
 - **Travel time t (min).** OSRM car durations between 2020 population-weighted county centres, as routed (not symmetrised). Off-diagonal median 207.3 min. Own-county time = 0.5214 x sqrt(land area) at the median effective speed of 66.5 straight-line km/h between counties (median 11.7 to 58.5 min). `# VERIFY` the own-county proxy. `dist` is great-circle km (road/straight median ratio 1.22).
 
 ## Suppressed cells and fills

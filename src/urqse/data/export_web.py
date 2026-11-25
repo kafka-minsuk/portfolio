@@ -18,20 +18,25 @@ import shapely
 from ..api import REGION_FORMAT
 from ..calibrate.run_state import state_estimates
 from .build_state import STATE_NAME, read_counties, sources, state_crs, state_zones
-from .loaders import COUNTY_FILE, TRAVEL_FILE, read_county, read_travel, state_dir, to_county_data, usd_per_wage_unit
+from .loaders import (
+    COUNTY_FILE, METRO_FILE, METRO_TRAVEL_FILE, TRAVEL_FILE, read_county, read_metro, read_travel, state_dir,
+    to_county_data, usd_per_wage_unit,
+)  # fmt: skip
 
 ROOT = Path(__file__).resolve().parents[3]
 OUT_DIR = ROOT / "docs" / "migration" / "data"
 INDEX_FILE = "regions.json"
 SIMPLIFY_M = 400.0
+SIMPLIFY_TRACT_M = 60.0  # tracts are small: keep more detail
+
 CORE_LABEL = {"IA": "Polk (Des Moines)"}
 
 
-def county_polygons(shp, fips, crs: int) -> list:
+def county_polygons(shp, fips, crs: int, simplify_m: float = SIMPLIFY_M) -> list:
     """Per county: a list of polygons, each a list of rings, each ring a flat [x0, y0, x1, y1, ...]
     in km. None for the external zone (not a polygon)."""
     counties = [f for f in fips if f in shp.index]
-    geoms = shapely.coverage_simplify(shp.loc[counties].to_crs(crs).geometry.values, SIMPLIFY_M)
+    geoms = shapely.coverage_simplify(shp.loc[counties].to_crs(crs).geometry.values, simplify_m)
     by_fips = dict(zip(counties, geoms))
 
     def rings(poly):
@@ -44,15 +49,20 @@ def county_polygons(shp, fips, crs: int) -> list:
 
 
 def region_document(state: str, year: int) -> dict:
+    """The region document; with data/{state}/{year}/metro.parquet (urqse.data.build_metro) the core's
+    metro is split into tracts (spec §3.12), and the state map keeps county outlines."""
     d = state_dir(state, year)
-    df = read_county(d / COUNTY_FILE)
-    fips, t, dist = read_travel(d / TRAVEL_FILE)
+    county_df = read_county(d / COUNTY_FILE)
+    metro = (d / METRO_FILE).exists()
+    df = read_metro(d / METRO_FILE) if metro else county_df
+    fips, t, dist = read_travel(d / (METRO_TRAVEL_FILE if metro else TRAVEL_FILE))
     data = to_county_data(df, fips, t, dist)
     src = sources(state, year)
     shared = ROOT / "data_raw" / "US"
     shp, _ = state_zones(read_counties(shared / src["counties"].file), shared / src["bea_emp"].file, state)
+    crs = state_crs(shp)
     est = state_estimates(state, year)
-    return {
+    doc = {
         "format": REGION_FORMAT,
         "region": f"{state}_{year}",
         "label": f"{STATE_NAME.get(state, state)} {year}",
@@ -67,15 +77,33 @@ def region_document(state: str, year: int) -> dict:
         },  # fmt: skip
         "t_min": np.round(t, 2).tolist(),
         "dist_km": np.round(dist, 2).tolist(),
-        "geometry": county_polygons(shp, fips, state_crs(shp)),
+        "geometry": county_polygons(shp, fips, crs),
     }
+    if not metro:
+        return doc
+    # metro nest: zones are counties + tracts; the state map draws the county view
+    parents = list(dict.fromkeys(df["parent"]))
+    cv = county_df.set_index("fips").loc[parents]
+    doc["counties"] |= {"nest": df["nest"].tolist(), "parent": df["parent"].tolist()}
+    doc["county_view"] = {"fips": parents, "name": cv["name"].tolist(), "kind": cv["kind"].tolist(),
+                          "x_km": cv["x_km"].tolist(), "y_km": cv["y_km"].tolist()}  # fmt: skip
+    doc["geometry"] = county_polygons(shp, parents, crs)
+    sf = df.loc[df["nest"] == 0, "fips"].iloc[0][:2]
+    tracts = read_counties(ROOT / "data_raw" / state / "tract" / f"cb_2022_{sf}_tract_500k.zip")
+    inside = df["nest"].to_numpy() == 0
+    doc["city"] = {"geometry": county_polygons(tracts, list(np.asarray(fips)[inside]), crs, simplify_m=SIMPLIFY_TRACT_M),
+                   "label": f"{CORE_LABEL.get(state, data.names[data.core])} metro area"}  # fmt: skip
+    return doc
 
 
 def index_entry(doc: dict) -> dict:
-    kind = doc["counties"]["kind"]
+    kind = doc.get("county_view", doc["counties"])["kind"]
     n = sum(k != "external" for k in kind)
-    return {"id": doc["region"], "label": doc["label"], "counties": n, "core_label": doc["core_label"],
-            "suburbs": sum(k == "suburb" for k in kind), "rural": sum(k == "rural" for k in kind)}  # fmt: skip
+    entry = {"id": doc["region"], "label": doc["label"], "counties": n, "core_label": doc["core_label"],
+             "suburbs": sum(k == "suburb" for k in kind), "rural": sum(k == "rural" for k in kind)}  # fmt: skip
+    if "city" in doc:
+        entry["tracts"] = sum(v == 0 for v in doc["counties"]["nest"])
+    return entry
 
 
 def update_index(doc: dict, out_dir: Path = OUT_DIR) -> Path:

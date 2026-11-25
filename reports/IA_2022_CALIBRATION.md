@@ -68,7 +68,7 @@ xi_A = (effective farm wage) / (observed farm labour earnings per worker), both 
 | core | 1 | 0.574 | 0.574 | 0.574 |
 | suburb | 21 | 0.713 | 0.533 | 1.405 |
 | rural | 77 | 0.748 | 0.485 | 1.216 |
-| all | 99 | 0.737 | 0.485 | 1.405 |
+| all with a farm sector | 99 | 0.737 | 0.485 | 1.405 |
 
 corr(ln xi_A, ln observed farm wage) = -0.972 (M3: -0.996). With default kappa*lam = 0.08 the median is 0.753; xi_A depends on kappa*lam through the effective wages, not on theta_T. The measured farm wage now varies across counties by a factor of 2.6 (M3: 19.2), so xi_A is no longer the inverse of a land-income measure. It still mirrors the measured wage: the effective farm wage that reproduces farm job counts varies little across counties, so cross-county variation in pay passes into xi_A. Of the log variance of the per-worker wage (0.0396), the per-job wage contributes 0.0272 and the conversion to ACS heads (1/scale) 0.0104. A median below 1 (0.74) says farm jobs are filled at a lower utility price than their pay would imply relative to non-farm jobs (amenity of farm work, or the per-head pay overstating what part-time proprietors earn in farm work). The per-county values are in the county table at the end.
 

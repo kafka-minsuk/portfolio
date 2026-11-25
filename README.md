@@ -48,6 +48,7 @@ the core) is the one checked by hand. Rebuild one state, or all of them:
 ```bash
 python -m urqse.data.build_state NE 2022      # data/NE/2022 (downloads cached in data_raw/US and data_raw/NE)
 python -m urqse.calibrate.run_state NE 2022   # estimates, calibration report
+python -m urqse.data.build_metro IA 2022      # optional: the core's metro area as census tracts (the city view)
 python -m urqse.data.export_web NE 2022       # docs/migration/data/NE_2022.json + regions.json (the page's menu)
 python scripts/build_all_states.py 2022       # all of the above for every supported state; hours on a first run
 python scripts/build_py_bundle.py             # docs/py/urqse.zip

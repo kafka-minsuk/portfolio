@@ -37,6 +37,7 @@ class CountyData:
     gateway: np.ndarray  # immigrant gateway weights
     dist: np.ndarray  # centroid distance, km (own = mean in-county trip)
     t: np.ndarray  # travel time, minutes
+    nest: np.ndarray | None = None  # metro nest label per zone, -1 = not in a nest (spec §3.12)
 
     @property
     def rural(self) -> np.ndarray:
@@ -44,7 +45,13 @@ class CountyData:
 
     @property
     def core(self) -> int:
+        """The core zone's index (the first one when the core county is split into tracts)."""
         return int(np.nonzero(self.kind == "core")[0][0])
+
+    @property
+    def core_mask(self) -> np.ndarray:
+        """Every zone of the core county (one county, or its tracts in a metro nest)."""
+        return self.kind == "core"
 
 
 def distances(x, y, own_km):

@@ -54,19 +54,6 @@ UNSUPPORTED = {
     "DC": "One county-equivalent with no farm jobs: no rural counties to consolidate.",
     "HI": "Islands: no road links between counties and no neighbouring state for the external commuting zone.",
 }
-# BEA CAEMP25N 2022 farm employment (L70) is 0 in these counties; the model needs H_A > 0 in every
-# zone (it works in log H_A). Left out by decision (2026-11-24) rather than changing the model.
-NO_FARM_COUNTIES = {
-    "CA": "Alpine, San Francisco", "CO": "Clear Creek, Gilpin, Lake, San Juan", "FL": "Franklin, Gulf, Monroe",
-    "LA": "Orleans", "MA": "Nantucket, Suffolk", "MD": "Baltimore city", "MI": "Crawford, Keweenaw", "MN": "Cook",
-    "MO": "St. Louis city", "NC": "Dare", "NJ": "Hudson", "NM": "Los Alamos", "NV": "Storey",
-    "NY": "Bronx, Hamilton, Kings, New York, Queens, Richmond",
-    "VA": "Arlington, Alexandria city, Hampton city, Newport News city, Norfolk city, Portsmouth city, "
-          "Richmond city, Roanoke city",
-    "WI": "Menominee", "WV": "McDowell, Mingo",
-}  # fmt: skip
-UNSUPPORTED |= {st: f"No farm jobs in {c} (BEA 2022); the model needs farm jobs in every county." for st, c in NO_FARM_COUNTIES.items()}
-
 ACRE_HA = 0.40468564224  # exact (international acre)
 STOREY_HEIGHT_M = 3.0  # floor space = building volume / storey height. source=GHSL GHS-BUILT-V is volume only  # VERIFY
 # Mean distance between two uniform points in a unit square (Ghosh 1951): used for the own-county trip.
@@ -615,10 +602,9 @@ def build(state: str, year: int, raw: Path, out: Path, shared: Path = SHARED_RAW
     for c, w in (("HA_bea", "TF"), ("HU_bea", "pop"), ("HA_prop_bea", "TF"), ("farm_earn_usd", "TF"), ("nonfarm_earn_usd", "pop")):
         df[c], miss = fill_suppressed(df[c].to_numpy(), totals[c], df[w].to_numpy(), signed=c.endswith("earn_usd"))
         gaps += [dict(var=c, fips=f, rule=f"state total minus disclosed counties, split by {w}") for f in np.array(fips)[miss]]
-    no_farm = df.index[~(df["HA_bea"] > 0)]
-    if len(no_farm):
-        raise ValueError(f"{state}: no farm jobs (BEA CAEMP25N L70 = 0) in {', '.join(df.loc[no_farm, 'name'])}; "
-                         "the model needs H_A > 0 in every zone")  # fmt: skip
+    # A county with no BEA farm jobs has no farm sector in the model (spec §3.11).
+    no_farm = df.index[df["HA_bea"] == 0]
+    gaps += [dict(var="HA_bea", fips=f, rule="0 farm jobs: no farm sector in the model (spec §3.11)") for f in no_farm]
 
     # NASS: tenure, land values, cash rents (county rows summed to zones; per-acre values weighted)
     nass = read_nass(nass_path)
@@ -679,14 +665,14 @@ def build(state: str, year: int, raw: Path, out: Path, shared: Path = SHARED_RAW
         bad = ~(np.isfinite(ratio) & (ratio > 0))
         ratio[bad] = state_y
         gaps += [dict(var="farm_comp_per_ws_job", fips=f, rule=f"{y}: compensation (D) or no farm wage jobs; state value")
-                 for f in np.array(fips)[bad]]  # fmt: skip
+                 for f in np.array(fips)[bad & (df["HA_bea"].to_numpy() > 0)]]  # fmt: skip
         per_job.append(ratio)
         state_per_job.append(state_y)
         index.append(nfe_y / e_y.loc[st, "nonfarm"])
         if y == year:
             df["farm_comp_usd"] = comp_y
     df["farm_labour_bill_usd"] = farm_wage_per_job(per_job, np.ones_like(per_job), index) * df["HA_bea"]
-    df["wA_bea_earn_usd"] = df["farm_earn_usd"] / df["HA_bea"]
+    df["wA_bea_earn_usd"] = df["farm_earn_usd"] / df["HA_bea"].where(df["HA_bea"] > 0)
     hired = nass_series(nass, "LABOR, HIRED - EXPENSE, MEASURED IN $", 2022, "CENSUS", sf)
     contract = nass_series(nass, "LABOR, CONTRACT - EXPENSE, MEASURED IN $", 2022, "CENSUS", sf)
     df["hired_labor_coa_usd"] = to_zones(hired["county"], zone_of).reindex(fips)
@@ -696,9 +682,11 @@ def build(state: str, year: int, raw: Path, out: Path, shared: Path = SHARED_RAW
 
     # jobs = workers with the external zone
     jobs = reconcile_jobs(*(df[c].to_numpy(float) for c in ("workers_res", "workers_out_state", "workers_work", "HU_bea", "HA_bea")))
-    df["wA_obs_usd"] = df["farm_labour_bill_usd"] / jobs["HA"][:Z]  # $ per farm worker (ACS head)
+    has_farm = jobs["HA"][:Z] > 0
+    # $ per farm worker (ACS head); 0 where there is no farm sector (spec §3.11)
+    df["wA_obs_usd"] = np.where(has_farm, df["farm_labour_bill_usd"] / np.where(has_farm, jobs["HA"][:Z], 1.0), 0.0)
     df["wU_obs_usd"] = df["nonfarm_earn_usd"] / df["HU_bea"]
-    bad_wA = df.index[~(df["wA_obs_usd"] > 0)]
+    bad_wA = df.index[has_farm & ~(df["wA_obs_usd"] > 0)]
     if len(bad_wA):
         raise ValueError(f"non-positive farm labour earnings in {list(bad_wA)}; needs a documented rule")
     df["gateway"] = (df["fb_recent"] / df["workers_res"]) / (df["fb_recent"].sum() / df["workers_res"].sum())
@@ -854,7 +842,7 @@ def report(table: pd.DataFrame, t: np.ndarray, meta: dict) -> str:
           "included, giving the county farm labour bill `farm_labour_bill_usd`; wA_obs_usd = bill / HA, so it is per farm "
           f"worker (ACS head) and the model's wage bill w_A H_A equals the bill in dollars. State: "
           f"{_fmt(c['farm_labour_bill_usd'].sum() / c['HA_bea'].sum())} $ per BEA farm job, {_fmt(e['wA_obs_usd'])} $ per farm "
-          f"worker; county range {_fmt(c['wA_obs_usd'].min())} to {_fmt(c['wA_obs_usd'].max())} $ per worker. State compensation "
+          f"worker; county range {_fmt(c.loc[c['HA'] > 0, 'wA_obs_usd'].min())} to {_fmt(c['wA_obs_usd'].max())} $ per worker. State compensation "
           "per farm wage job by year: " + ", ".join(f"{y} {_fmt(v)} $" for y, v in zip(range(fw['years'][0], fw['years'][1] + 1), fw['comp_per_ws_job'])) + ". "
           "Proprietors are priced at the hired wage per job (the market price of farm labour in the county) rather than at a "
           "non-farm opportunity wage, which would assume away the farm/non-farm gap xi_A is meant to measure. `# VERIFY` the "
@@ -884,6 +872,9 @@ def report(table: pd.DataFrame, t: np.ndarray, meta: dict) -> str:
           f"- **kind.** core = the metropolitan county with the most non-farm jobs ({c.loc[c['kind'] == 'core', 'name'].iloc[0]}); "
           f"suburb = other counties in a Metropolitan Statistical Area (OMB 2023) ({(c['kind'] == 'suburb').sum()}); "
           f"rural = the rest ({(c['kind'] == 'rural').sum()}). `# VERIFY` one core for a multi-metro state.",
+          f"- **No farm sector** (spec §3.11): {int((c['HA'] == 0).sum())} counties have no BEA farm jobs"
+          + (f" ({', '.join(c.loc[c['HA'] == 0, 'name'])}); their farm wage is 0 and the model gives them no farm job option."
+             if (c['HA'] == 0).any() else "."),
           f"- **Travel time t (min).** OSRM car durations between 2020 population-weighted county centres, as routed (not "
           f"symmetrised). Off-diagonal median {np.median(t[:-1, :-1][~np.eye(len(c), dtype=bool)]):.1f} min. Own-county "
           f"time = {SQUARE_MEAN_DIST:.4f} x sqrt(land area) at the median effective speed of {meta['speed_km_per_min'] * 60:.1f} "

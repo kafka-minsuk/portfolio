@@ -41,7 +41,7 @@ xi_A = (effective farm wage) / (observed farm labour earnings per worker), both 
 | core | 1 | 0.330 | 0.330 | 0.330 |
 | suburb | 10 | 0.702 | 0.465 | 1.240 |
 | rural | 82 | 0.682 | 0.314 | 1.610 |
-| all | 93 | 0.691 | 0.314 | 1.610 |
+| all with a farm sector | 93 | 0.691 | 0.314 | 1.610 |
 
 ## 3. Cash-rent over-identification test (spec §5 step 5)
 

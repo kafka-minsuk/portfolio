@@ -19,7 +19,7 @@ def test_state_table_covers_50_states_and_dc():
     assert len(bs.STATES) == 51 and len(set(bs.STATE_FIPS.values())) == 51
     assert bs.STATE_FIPS["IA"] == "19" and bs.FIPS_STATE["48"] == "TX"
     assert set(bs.UNSUPPORTED) <= set(bs.STATES)
-    assert {"AK", "HI", "CT", "DC", "NY"} <= set(bs.UNSUPPORTED)
+    assert set(bs.UNSUPPORTED) == {"AK", "HI", "CT", "DC"}  # zero-farm counties are allowed (spec §3.11)
 
 
 def test_unsupported_state_exits_with_its_reason():
@@ -137,3 +137,49 @@ def test_metro_counties_keep_the_leading_zero(tmp_path):
     assert bs.read_metro_counties(p) == {"01073", "19153"}
     with pytest.raises(ValueError, match="Metropolitan"):
         bs.county_kinds(["01001"], np.array([1.0]), metro=set())
+
+
+# --- metro nest build (urqse.data.build_metro) ---------------------------------------------------
+
+
+def test_tract_rows_split_county_totals_and_keep_farm_jobs_on_farmland():
+    from urqse.data import build_metro as bm
+
+    county = pd.Series({"N": 1000.0, "HU": 900.0, "HA": 100.0, "TF": 50.0, "pasture_ha": 10.0, "L": 4e5,
+                        "wA_obs_usd": 40_000.0, "nonfarm_earn_usd": 9e7, "pop": 2000.0, "omega": 0.6,
+                        "gateway": 1.2, "cash_rent_usd_acre": 200.0, "cash_rent_filled": False,
+                        "land_value_usd_acre": 9000.0, "kind": "suburb"})  # fmt: skip
+    tr = pd.DataFrame({"rac": [3.0, 1.0, 0.0], "wac": [5.0, 3.0, 2.0], "wac_farm": [0.0, 2.0, 1.0],
+                       "TF": [0.0, 30.0, 10.0], "pasture_ha": [1.0, 1.0, 0.0], "L": [5.0, 3.0, 2.0],
+                       "cenpop": [10.0, 5.0, 5.0]}, index=["a", "b", "c"])  # fmt: skip
+    out = bm.tract_rows(county, tr)
+    for c in ("N", "HU", "HA", "TF", "L", "nonfarm_earn_usd", "pop"):
+        assert out[c].sum() == pytest.approx(county[c])
+    assert out["HA"].tolist() == pytest.approx([0.0, 200 / 3, 100 / 3])  # tract a has no cropland
+    assert out["wA_obs_usd"].tolist() == [0.0, 40_000.0, 40_000.0]
+    np.testing.assert_allclose(out["N"], [750.0, 250.0, 0.0])
+
+
+def test_metro_counties_of_the_core(tmp_path):
+    from urqse.data import build_metro as bm
+
+    p = tmp_path / "cbsa.csv"
+    p.write_text("CBSA,MDIV,STCOU,NAME,LSAD\n19780,,,\"Des Moines, IA\",Metropolitan Statistical Area\n"
+                 "19780,,19153,\"Polk County, IA\",County or equivalent\n19780,,19049,\"Dallas County, IA\",County or equivalent\n"
+                 "36540,,31055,\"Douglas County, NE\",County or equivalent\n36540,,19155,\"Pottawattamie, IA\",County or equivalent\n")
+    assert bm.metro_counties(p, "19153", "19") == ["19049", "19153"]
+    assert bm.metro_counties(p, "31055", "31") == ["31055"]  # the Iowa part of Omaha's metro is left out
+
+
+def test_built_iowa_metro_adds_up_to_counties():
+    from urqse.data.loaders import COUNTY_FILE, METRO_FILE, read_county, read_metro, state_dir
+
+    d = state_dir("IA", 2022)
+    if not (d / METRO_FILE).exists():
+        pytest.skip("Iowa metro data not built")
+    m, c = read_metro(d / METRO_FILE), read_county(d / COUNTY_FILE).set_index("fips")
+    tr = m[m["nest"] == 0]
+    assert len(tr) == 162 and set(tr["parent"]) == {"19049", "19077", "19099", "19121", "19153", "19181"}
+    sums = tr.groupby("parent")[["N", "HU", "HA", "L", "TF"]].sum()
+    np.testing.assert_allclose(sums, c.loc[sums.index, ["N", "HU", "HA", "L", "TF"]], rtol=1e-10)
+    assert m["N"].sum() == pytest.approx(c["N"].sum(), rel=1e-12)

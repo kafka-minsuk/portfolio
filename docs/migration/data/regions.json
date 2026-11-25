@@ -9,12 +9,101 @@
    "rural": 58
   },
   {
+   "id": "GA_2022",
+   "label": "Georgia 2022",
+   "counties": 159,
+   "core_label": "Fulton",
+   "suburbs": 73,
+   "rural": 85
+  },
+  {
+   "id": "ID_2022",
+   "label": "Idaho 2022",
+   "counties": 44,
+   "core_label": "Ada",
+   "suburbs": 13,
+   "rural": 30
+  },
+  {
+   "id": "IL_2022",
+   "label": "Illinois 2022",
+   "counties": 102,
+   "core_label": "Cook",
+   "suburbs": 36,
+   "rural": 65
+  },
+  {
    "id": "IA_2022",
    "label": "Iowa 2022",
    "counties": 99,
    "core_label": "Polk (Des Moines)",
    "suburbs": 21,
-   "rural": 77
+   "rural": 77,
+   "tracts": 162
+  },
+  {
+   "id": "KS_2022",
+   "label": "Kansas 2022",
+   "counties": 105,
+   "core_label": "Johnson",
+   "suburbs": 19,
+   "rural": 85
+  },
+  {
+   "id": "LA_2022",
+   "label": "Louisiana 2022",
+   "counties": 64,
+   "core_label": "East Baton Rouge",
+   "suburbs": 36,
+   "rural": 27
+  },
+  {
+   "id": "ME_2022",
+   "label": "Maine 2022",
+   "counties": 16,
+   "core_label": "Cumberland",
+   "suburbs": 4,
+   "rural": 11
+  },
+  {
+   "id": "MD_2022",
+   "label": "Maryland 2022",
+   "counties": 24,
+   "core_label": "Montgomery",
+   "suburbs": 16,
+   "rural": 7
+  },
+  {
+   "id": "MN_2022",
+   "label": "Minnesota 2022",
+   "counties": 87,
+   "core_label": "Hennepin",
+   "suburbs": 26,
+   "rural": 60
+  },
+  {
+   "id": "MS_2022",
+   "label": "Mississippi 2022",
+   "counties": 82,
+   "core_label": "Hinds",
+   "suburbs": 19,
+   "rural": 62
+  },
+  {
+   "id": "MO_2022",
+   "label": "Missouri 2022",
+   "counties": 115,
+   "core_label": "St. Louis",
+   "suburbs": 34,
+   "rural": 80
+  },
+  {
+   "id": "MT_2022",
+   "label": "Montana 2022",
+   "counties": 56,
+   "core_label": "Yellowstone",
+   "suburbs": 9,
+   "rural": 46
   },
   {
    "id": "NE_2022",
@@ -23,6 +112,30 @@
    "core_label": "Douglas",
    "suburbs": 10,
    "rural": 82
+  },
+  {
+   "id": "NH_2022",
+   "label": "New Hampshire 2022",
+   "counties": 10,
+   "core_label": "Hillsborough",
+   "suburbs": 2,
+   "rural": 7
+  },
+  {
+   "id": "NJ_2022",
+   "label": "New Jersey 2022",
+   "counties": 21,
+   "core_label": "Bergen",
+   "suburbs": 20,
+   "rural": 0
+  },
+  {
+   "id": "WV_2022",
+   "label": "West Virginia 2022",
+   "counties": 55,
+   "core_label": "Kanawha",
+   "suburbs": 19,
+   "rural": 35
   }
  ]
 }

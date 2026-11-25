@@ -212,6 +212,47 @@ This is closed form, so the frontier responds smoothly to labour. More farm work
 - **Fringe conversion (Capozza–Helsley):** farmland at the edge converts to built use when urban land value minus conversion cost exceeds farmland value plus the option value of waiting. With $T^B_n+T^F_n\le T_n$, the built area $T^B$ grows and $\underline{L}_n\propto T^B_n$ shifts. This is how cities physically consume farmland.
 - **Calibration point:** observed farmland price/rent ratios embed discount-rate and expectation shocks the model doesn't explain. The U.S. cropland price-to-cash-rent ratio rose from about 20 in 1998 to 36 in 2025. Back out $(i-g)$ by region from that ratio and **hold it fixed** in counterfactuals, so price changes come only from model rents.
 
+### 3.11 Locations without a farm sector
+
+A location with no farm jobs in the data ($H^{data}_{An}=0$: city counties such as Manhattan or San
+Francisco, census tracts in a metro nest) has **no farm job option**. Formally $\xi_{An}=0$, so
+$(w_{An}\xi_{An}e^{-\kappa t_{in}})^\lambda=0$ in (L) and $H_{An}=0$ for every wage. The farm block (F)
+does not apply there: $w_{An}$, $\rho_n$ and $\tilde A_n$ are set to 0, and its farmland $T^F_n$ earns
+no rent (it stays in the consolidation ratio of §3.9 as idle land). Everything else (non-farm jobs,
+floor space, residence, flows) is unchanged. The set of farm locations is fixed by the data at
+calibration and does not change in counterfactuals: a shock cannot open a farm sector.
+
+In the solver the unknown $\ln w_{An}$ of such a location is a placeholder that its own fixed-point map
+leaves in place (residual 0), so the convergence contract is unchanged. A county with a vanishing farm
+sector converges to this case (tested).
+
+### 3.12 A metro nest (city view)
+
+The core's Metropolitan Statistical Area (its in-state part) can be split into census tracts that are
+zones of their own. Workplace choice (L), floor space (R), (Z) and (F) run unchanged on all zones
+(counties outside the metro, tracts, the external zone). Only the residence choice is nested: residents
+pick a county or the metro with $\lambda_R$, then a tract inside the metro with $\lambda_M\ge\lambda_R$:
+
+$$
+u_M=\Big(\sum_{k\in\mathcal K}u_k^{\lambda_M}\Big)^{1/\lambda_M},\quad
+N_c=\bar N\frac{u_c^{\lambda_R}}{\sum_{c'}u_{c'}^{\lambda_R}+u_M^{\lambda_R}},\quad
+N_M=\bar N\frac{u_M^{\lambda_R}}{\sum_{c'}u_{c'}^{\lambda_R}+u_M^{\lambda_R}},\quad
+N_k=N_M\frac{u_k^{\lambda_M}}{\sum_{k'}u_{k'}^{\lambda_M}} .
+\tag{S'}
+$$
+
+$W$ is (S) over counties and the metro. $\lambda_M=\lambda_R$ is the flat choice over counties and tracts.
+**Calibration** (§5 step 7): $\ln A_k=\frac{\ln N_k}{\lambda_M}+\ln N_M\big(\frac1{\lambda_R}-\frac1{\lambda_M}\big)+(1-\alpha)\ln r_k-\frac{\ln\Phi_k}{\lambda}$.
+**Path** (§3.8): flows, flow offsets $\delta$ and arrivals act on residence units (counties and the
+metro as a whole); migration costs into and out of the metro use resident-weighted distances
+(`# VERIFY`). Inside the metro, residents re-sort to (S') every period (moving within a metro is fast).
+**Data** (`urqse.data.build_metro`): each county total is split over its tracts by LODES residents (RAC)
+and jobs (WAC; farm jobs = NAICS 11 on tracts with CDL cropland), GHSL floor space and CDL farmland,
+so tracts add up to their county exactly; farm wage, owner share and gateway are the county's. Most
+city tracts have no farm sector (§3.11). The app shows the state view summed to counties and opens the
+tract map on a double-click. With the same shock the tract model need not match the county model:
+finer geography lets residents who leave the core's dearer tracts stay in the core county.
+
 ---
 
 ## 4. Analytic core: why migration responses differ (solves R8)
@@ -432,6 +473,8 @@ urqse/
 | homogeneity | scaling all $w$ and $r$ by $c$ leaves allocations unchanged |
 | property tests (hypothesis) | random $Z\le15$ economies converge, with positive values |
 | regression snapshots | one real state (e.g. Iowa, Kansas) pinned outputs |
+| ✓ metro nest (§3.12) | $\lambda_M=\lambda_R$ equals the flat model; inversion to 1e-7; zero shock; a policy inside the metro moves rural counties; conservation and (S') on the path; tracts add up to counties; property tests |
+| ✓ no farm sector (§3.11) | inversion to 1e-7, zero shock, identities, homogeneity, conservation and property tests with $H_A=0$ locations; the limit of a vanishing farm sector |
 
 ---
 
@@ -443,6 +486,8 @@ urqse/
 4. **M4 (assets):** price paths, ownership options, validation against NASS land values and FHFA.
 5. **M5 (hat algebra + JAX):** fast counterfactuals, dynamic hat algebra, uniqueness checks.
 6. **M6 (app polish / migrate front end if needed).**
+7. **M7 (city view):** a metro nest of census tracts (§3.12). M7a single metro (done for Iowa); M7b
+   agglomeration and amenity spillovers with travel-time decay at tract scale; M7c several metros.
 
 ## 12. Decisions (resolved, v1.1)
 
@@ -450,6 +495,12 @@ urqse/
 2. **No domestic inflow:** $\eta=0$. The region exchanges no people with the rest of the country. **External (international) immigration** is an exogenous scenario path $I_t\ge0$, allocated by §12.2.
 3. **Land: independent owner-operators plus landlords**, with county tenure shares (§12.1).
 4. First state: Iowa (then Kansas, Nebraska).
+5. **Locations without a farm sector are allowed** (§3.11, decided 2026-11-24). Needed for city counties
+   with no farm jobs and for census tracts in the metro nest (proposal M7).
+6. **Metro nest, v1 (§3.12, decided 2026-11-24, proposal M7 defaults):** one nest, the in-state part of
+   the core's metro area; residents re-sort inside it every period; $\lambda_M/\lambda_R$ = 1 by default
+   with a slider (`# VERIFY`, no estimate); at most 400 tracts; a metro's out-of-state part stays in the
+   external zone. Several metros (multi-polar) later.
 
 ### 12.1 Land ownership block
 
@@ -464,6 +515,17 @@ Each county has an owner-operated share $\omega_n$ of farmland (Census of Agricu
 ### 12.2 External immigration
 
 $\bar N_{t+1}=\bar N_t+I_t$. New arrivals choose a county by the same residence logit as natives, with an optional gateway shifter $g_n$ (weights from ACS foreign-born recent arrivals): $\Pr(n)\propto g_n\exp((\ln u_{nt}+\delta_n)/\nu)$. Natives' flows (§3.8) are unchanged. The static long run solves (S) with $\eta=0$ and $\bar N=\bar N_0+\sum I$.
+
+---
+
+## 13. Changelog
+
+- **2026-11-24.** §3.11: locations without a farm sector ($\xi_A=0$; $H_A$, $w_A$, $\rho$ are 0). Decision
+  12.5. Before this, every location needed farm jobs, which excluded 17 states with a zero-farm county.
+- **2026-11-24.** §3.12: a metro nest of census tracts with a nested residence choice (S'),
+  $\lambda_M\ge\lambda_R$ (`Params.lam_M_over_R`), path flows between residence units with re-sorting
+  inside the metro. Decision 12.6. Pre-existing and flagged (`# VERIFY`, §12.2): immigrant arrivals
+  choose a residence unit without weighting by its size, so they over-weight small units.
 
 ---
 

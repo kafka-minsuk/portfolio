@@ -13,7 +13,7 @@ const ready = (async () => {
   status("numpy", "Loading NumPy…");
   await py.loadPackage("numpy");
   status("model", "Loading the model package…");
-  const res = await fetch(new URL("../py/urqse.zip", self.location.href));
+  const res = await fetch(new URL("../py/urqse.zip", self.location.href), { cache: "no-cache" });
   if (!res.ok) throw new Error(`Model package py/urqse.zip not found (HTTP ${res.status}).`);
   py.unpackArchive(await res.arrayBuffer(), "zip");
   py.runPython(`
@@ -37,7 +37,7 @@ function loadRegion(py, region) {
   if (!region || region === "synthetic") return null;
   if (!/^[A-Z]{2}_\d{4}$/.test(region)) throw new Error(`Unknown region ${region}`);
   if (!loaded.has(region)) loaded.set(region, (async () => {
-    const res = await fetch(new URL(`data/${region}.json`, self.location.href));
+    const res = await fetch(new URL(`data/${region}.json`, self.location.href), { cache: "no-cache" });
     if (!res.ok) throw new Error(`Region data data/${region}.json not found (HTTP ${res.status}).`);
     py.globals.get("_load")(region, await res.text());
   })().catch(err => { loaded.delete(region); throw err; }));

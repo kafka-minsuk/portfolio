@@ -107,8 +107,10 @@ def farm_earnings_mean(zip_path, state, year, fips, n_years=EARN_YEARS):
 
 
 def theta_T_table(df, earn_mean) -> dict:
-    """theta_T by county under each definition of the farm labour bill (report §4). Dollars."""
-    rent_bill = df["cash_rent_usd_acre"].to_numpy(float) * df["TF"].to_numpy(float) / checks.HA_PER_ACRE
+    """theta_T by county under each definition of the farm labour bill (report §4). Dollars.
+    Counties without a farm sector (spec §3.11) have no rent bill and a NaN county theta_T."""
+    farm = df["HA"].to_numpy(float) > 0
+    rent_bill = np.where(farm, df["cash_rent_usd_acre"].to_numpy(float) * df["TF"].to_numpy(float) / checks.HA_PER_ACRE, 0.0)
     E = df["farm_earn_usd"].to_numpy(float)
     omega = df["omega"].to_numpy(float)
     jobs = df["HA_bea"].to_numpy(float)
@@ -136,7 +138,7 @@ def farm_income_accounts(cal, data, counties, usd, E) -> dict:
     (wages + proprietors' income). The identity labour + owner rent + landlord rent = w_A H_A + rho T^F
     holds by construction; the comparison with E shows what wA_obs already contains."""
     w = cal.baseline.within
-    c = counties
+    c = counties & (data.HA > 0)  # farm income only where there is a farm sector (spec §3.11)
     HA, TF, omega = data.HA[c], data.TF[c], data.omega[c]
     operator = land.operator_income(w.wA[c], w.rho[c], TF, HA, omega) * HA * usd
     labour = w.wA[c] * HA * usd
@@ -197,12 +199,12 @@ def run(state: str, year: int, raw: Path, ddir: Path, shared: Path = bs.SHARED_R
     cal0, cal = calibrate(data, p0), calibrate(data, p_state)
 
     # 2. over-identification: model rho vs NASS cash rents (published counties only)
-    pub = ~cdf["cash_rent_filled"].to_numpy(bool)
+    pub = ~cdf["cash_rent_filled"].to_numpy(bool) & (cdf["HA"].to_numpy(float) > 0)  # published rent, farm sector
     overid = overid_runs(cal0, cal, p0, p_state, counties, cdf, usd, pub)
     obs = cdf["cash_rent_usd_acre"].to_numpy(float)
     TF = cdf["TF"].to_numpy(float)
     bill = cdf["farm_labour_bill_usd"].to_numpy(float)
-    corr_log_farmland = float(np.corrcoef(np.log(bill / cdf["farmland_census_ha"].to_numpy(float))[pub], np.log(obs[pub]))[0, 1])
+    corr_log_farmland = float(np.corrcoef(np.log(bill[pub] / cdf["farmland_census_ha"].to_numpy(float)[pub]), np.log(obs[pub]))[0, 1])
     E = cdf["farm_earn_usd"].to_numpy(float)
     accounts = farm_income_accounts(cal, data, counties, usd, E)
 

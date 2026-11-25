@@ -82,10 +82,20 @@ class Choice:
         return self.eU * q, self.eA * q
 
 
-def choice(D, ln_wtU, ln_wtA, N, lam) -> Choice:
-    zU, zA = lam * ln_wtU, lam * ln_wtA
-    shift = float(max(zU.max(), zA.max()))
-    eU, eA = np.exp(zU - shift), np.exp(zA - shift)
+def farm_mask(xi_A) -> np.ndarray:
+    """Locations with a farm sector (§3.11): the farm job option exists where xi_A > 0."""
+    return np.asarray(xi_A) > 0.0
+
+
+def choice(D, ln_wtU, ln_wtA, N, lam, farm=None) -> Choice:
+    """farm: locations with a farm sector (default all). Elsewhere the farm option is absent
+    (e_A = 0, so H_A = 0), and ln_wtA there is ignored."""
+    zU, zA = lam * ln_wtU, lam * np.asarray(ln_wtA, float)
+    if farm is None:
+        farm = np.ones(zA.shape, bool)
+    shift = float(max(zU.max(), zA[farm].max())) if farm.any() else float(zU.max())
+    eU = np.exp(zU - shift)
+    eA = np.where(farm, np.exp(np.where(farm, zA, 0.0) - shift), 0.0)
     Phi_s = D @ (eU + eA)
     M = D.T @ (N / Phi_s)
     return Choice(D, eU, eA, Phi_s, np.log(Phi_s) + shift, M, eU * M, eA * M)
@@ -96,16 +106,53 @@ def expected_log_utility(A, r, lnPhi, p: Params):
     return math.lgamma(1.0 - 1.0 / p.lam) + np.log(A) - (1.0 - p.alpha) * np.log(r) + lnPhi / p.lam
 
 
-# --- residence (S) -----------------------------------------------------------------------
+# --- residence (S), nested (S') ------------------------------------------------------------
 
 
-def residence_log_shares(lnu, lam_R):
-    z = lam_R * lnu
-    return z - logsumexp(z)
+def outer_units(nest, Z: int):
+    """Residence units of the first-stage choice (spec §3.12): every zone outside a nest is its own
+    unit; all zones of a nest form one unit. nest: (Z,) ints, -1 = not in a nest, or None.
+    Returns (unit of each zone, number of units, nest label of each unit or -1)."""
+    if nest is None or np.all(np.asarray(nest) < 0):
+        return np.arange(Z), Z, np.full(Z, -1)
+    nest = np.asarray(nest)
+    key = np.where(nest < 0, np.arange(Z), Z + nest)  # a nest's key sits after every zone index
+    first = {}
+    unit = np.empty(Z, int)
+    for z, k in enumerate(key):  # units in order of first appearance
+        unit[z] = first.setdefault(int(k), len(first))
+    label = np.full(len(first), -1)
+    label[unit[nest >= 0]] = nest[nest >= 0]
+    return unit, len(first), label
 
 
-def log_welfare(lnu, lam_R) -> float:
-    return logsumexp(lam_R * lnu) / lam_R
+def unit_log_values(lnu, nest, lam_M):
+    """ln u of each first-stage unit: the zone's own ln u, or a nest's CES value
+    ln u_M = logsumexp(lam_M ln u_k) / lam_M over its zones."""
+    unit, U, _ = outer_units(nest, lnu.size)
+    out = np.full(U, -np.inf)
+    for u in range(U):
+        z = lnu[unit == u]
+        out[u] = z[0] if z.size == 1 else logsumexp(lam_M * z) / lam_M
+    return out
+
+
+def residence_log_shares(lnu, lam_R, nest=None, lam_M=None):
+    """ln(N_i / N_bar). Flat (S) without a nest; nested (S') with one: counties and nests by lam_R,
+    zones inside a nest by lam_M (>= lam_R)."""
+    if nest is None or np.all(np.asarray(nest) < 0):
+        z = lam_R * lnu
+        return z - logsumexp(z)
+    unit, _, _ = outer_units(nest, lnu.size)
+    lnu_U = unit_log_values(lnu, nest, lam_M)
+    outer = lam_R * lnu_U - logsumexp(lam_R * lnu_U)
+    inner = np.where(np.asarray(nest) >= 0, lam_M * (lnu - lnu_U[unit]), 0.0)
+    return outer[unit] + inner
+
+
+def log_welfare(lnu, lam_R, nest=None, lam_M=None) -> float:
+    lnu_U = lnu if nest is None or np.all(np.asarray(nest) < 0) else unit_log_values(lnu, nest, lam_M)
+    return logsumexp(lam_R * lnu_U) / lam_R
 
 
 def congestion_elasticities(p: Params):
