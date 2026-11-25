@@ -10,7 +10,7 @@ from hypothesis import strategies as st
 
 from urqse.calibrate.invert import calibrate
 from urqse.model import blocks, land
-from urqse.model.dynamics import ConsolidationStop, simulate
+from urqse.model.dynamics import simulate
 from urqse.model.equilibrium import commuting_kernels, solve_static
 from urqse.model.fundamentals import with_shocks
 from urqse.model.params import Params
@@ -126,7 +126,7 @@ def test_path_conserves_population_plus_immigration(nf_data, nf_cal, params):
     f1 = with_shocks(f0, core=nf_data.core, a_TH=params.a_TH, core_productivity_pct=10.0)
     imm = np.full(20, 500.0)
     path = simulate(f0, f1, params, N0=nf_cal.baseline.N, x0=nf_cal.baseline.within.x, immigration=imm,
-                    stop=ConsolidationStop(nf_data.rural, params.epsilon, params.ss_tol))  # fmt: skip
+                    rural=nf_data.rural)  # fmt: skip
     assert path.all_converged
     np.testing.assert_allclose(path.N.sum(axis=1), nf_data.N.sum() + np.concatenate([[0.0], np.cumsum(imm)]), rtol=1e-9)
     assert np.all(path.stack("HA")[:, nf_data.HA == 0] == 0)

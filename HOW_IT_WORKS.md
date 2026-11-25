@@ -18,9 +18,9 @@ Each person lives in one place and works in one place, in a farm job or a non-fa
 
 Non-farm firms use labour and commercial floor space. Farms use labour and farmland. Floor space gets more expensive as more people want it, at a rate set by the supply elasticity μ. Farmland is fixed, so fewer farm workers means more land per worker.
 
-Moving home is slower than changing jobs. The long run uses a second, less elastic choice of residence (λ_R). Along the path, people move period by period with migration costs that rise with distance. The state is closed to the rest of the country by default (η = 0). International immigration is an optional inflow.
+Moving home is slower than changing jobs. The long run uses a second, less elastic choice of residence (λ_R). Along the path, each period some residents come across a home in another county, more often nearby, and move if it is better for them, with the same elasticity λ_R. So the path ends exactly at the long run. The moving cost τ₀ sets how fast, not where. The state is closed to the rest of the country by default (η = 0). International immigration is an optional inflow.
 
-The path stops when farmland per rural farm worker has risen by the consolidation target ε, or when nothing moves any more. Land income is wealth. A farmer who moves keeps it, so it does not hold anyone in place unless you turn that switch on.
+The path stops when utility matches across regions to within 0.1%: wages, commuting, rents and amenities together leave no one better off by moving. If that takes longer than the horizon, the page says how large the gap still is. Consolidation (farmland per rural farm worker) is an outcome along the way, not a target. Land income is wealth. A farmer who moves keeps it, so it does not hold anyone in place unless you turn that switch on.
 
 Two extensions handle real geography. A county or tract with no farm jobs has no farm option at all (spec §3.11). Each state also has several poles (spec §3.12). Every metropolitan area is a group of counties. People first choose a rural county or one of the metros, then choose a place inside that metro. The λ_M / λ_R slider sets how much more readily people move within a metro than between metros. At 1, the default, every place competes on equal terms. In Iowa the Des Moines metro area is split further into 162 census tracts. Double-click it on the map to see them.
 
@@ -48,7 +48,7 @@ The model sits in the quantitative spatial economics literature reviewed by Redd
 | Home and workplace choice with commuting | Fréchet choice over home and workplace pairs, and exact model inversion | Ahlfeldt, Redding, Sturm and Wolf (Econometrica 2015) |
 | Commuting and migration across U.S. counties | County commuting matrix with separate commuting and migration margins | Monte, Redding and Rossi-Hansberg (AER 2018) |
 | Gravity estimation | Poisson pseudo-maximum likelihood with fixed effects, zeros kept | Santos Silva and Tenreyro (REStat 2006) |
-| Migration along the path | Dynamic logit flows with migration costs | Artuç, Chaudhuri and McLaren (AER 2010), and Caliendo, Dvorkin and Parro (Econometrica 2019) |
+| Migration along the path | Logit migration flows with distance-based moving costs, built so their steady state is the static equilibrium | Artuç, Chaudhuri and McLaren (AER 2010), and Caliendo, Dvorkin and Parro (Econometrica 2019) |
 | Counterfactuals | Exact hat algebra (planned for fast solves) | Dekle, Eaton and Kortum (2007) |
 | Farm-job wedge | Read as a reduced-form gap that includes selection, not a pure distortion | Gollin, Lagakos and Waugh (QJE 2014), and Hamory, Kleemans, Li and Miguel (JEEA 2021) |
 | Floor-space supply | Elasticity near 0.5 for U.S. urban tracts | Baum-Snow and Han (JPE 2024) |
@@ -64,7 +64,8 @@ These are deliberate simplifications. Each is a known limit, not an oversight.
 - There is no agglomeration and no amenity spillover. Ahlfeldt et al. estimate both. Adding them is milestone M7b, at tract scale, with the uniqueness check.
 - Agents are myopic along the path. Caliendo, Dvorkin and Parro use forward-looking agents.
 - Each state has one core county. A state with several large metros treats the others as suburbs or rural counties.
-- The state is closed to domestic migration (η = 0). Only international immigrants arrive, and they currently choose places without regard to size, which over-weights small places. That rule is flagged `# VERIFY`.
+- The state is closed to domestic migration (η = 0). Only international immigrants arrive. They settle by the same residence choice as everyone else, tilted toward gateway counties.
+- The speed of the path rests on placeholder moving costs (`# VERIFY`), set for a 3% yearly county move rate, not yet estimated from IRS flows. States with large, far-apart counties adjust slowest: Nevada still has a 2.4% utility gap after 400 periods.
 - Tract data inside the metro is the county data split by LODES shares. Wages and land tenure are the county's.
 
 ## Data rules for particular states

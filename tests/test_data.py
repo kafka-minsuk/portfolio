@@ -323,7 +323,7 @@ def test_zero_gateway_gets_no_arrivals():
 
     with warnings.catch_warnings():
         warnings.simplefilter("error")
-        s = arrival_shares(np.zeros(3), np.zeros(3), np.array([1.0, 0.0, 2.0]), 2.0)
+        s = arrival_shares(np.zeros(3), 3.0, np.array([1.0, 0.0, 2.0]))
     assert s[1] == 0.0 and abs(s.sum() - 1.0) < 1e-12
 
 

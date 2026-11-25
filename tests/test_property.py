@@ -5,7 +5,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from urqse.calibrate.invert import calibrate
-from urqse.model.dynamics import ConsolidationStop, simulate
+from urqse.model.dynamics import simulate
 from urqse.model.equilibrium import solve_static
 from urqse.model.fundamentals import with_shocks
 from urqse.model.params import Params
@@ -37,7 +37,7 @@ def test_random_economies_converge_with_positive_values(Z, seed, eta, theta_T, s
 
     path = simulate(
         cal.fundamentals, f, p, N0=cal.baseline.N, x0=cal.baseline.within.x,
-        immigration=np.zeros(5), stop=ConsolidationStop(data.rural, p.epsilon, p.ss_tol),
+        immigration=np.zeros(5), rural=data.rural,
     )  # fmt: skip
     assert path.all_converged
     assert np.all(path.N > 0)

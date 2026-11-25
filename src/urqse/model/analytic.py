@@ -45,7 +45,7 @@ def two_location_economy(p: Params) -> Fundamentals:
     f = Fundamentals(
         A=np.array([1.0, 1.1]), B=np.array([1.0, ABSENT]), A_farm=np.array([ABSENT, 1.0]),
         L_bar=ones, TF=ones, xi_A=ones, omega=0.5 * ones, t=t, tau=np.zeros((2, 2)),
-        delta=np.zeros(2), gateway=ones, U_bar=1.0, N_bar0=2.0,
+        gateway=ones, U_bar=1.0, N_bar0=2.0,
     )  # fmt: skip
     base = solve_static(f, replace(p, eta=0.0))
     return replace(f, U_bar=float(np.exp(base.lnW)))

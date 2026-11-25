@@ -10,7 +10,7 @@ from hypothesis import strategies as st
 
 from urqse.calibrate.invert import calibrate
 from urqse.model import blocks, land
-from urqse.model.dynamics import ConsolidationStop, simulate, solve_period
+from urqse.model.dynamics import simulate, solve_period
 from urqse.model.equilibrium import solve_static
 from urqse.model.fundamentals import with_shocks
 from urqse.model.params import Params
@@ -33,7 +33,7 @@ P2 = Params(lam_M_over_R=2.0)
 @pytest.fixture(scope="module")
 def ncal(nd):
     cal = calibrate(nd, P2)
-    assert cal.baseline.info.converged and cal.flow_info.converged
+    assert cal.baseline.info.converged
     return cal
 
 
@@ -65,7 +65,7 @@ def test_lam_M_below_lam_R_is_rejected():
 def test_inversion_reproduces_data_with_a_nest(nd, ncal):
     assert all(err < 1e-7 for err in ncal.max_rel_error.values()), ncal.max_rel_error
     np.testing.assert_allclose(ncal.baseline.N, nd.N, rtol=1e-9)
-    assert ncal.fundamentals.tau.shape == (17, 17) and ncal.fundamentals.delta.shape == (17,)  # 16 rural + 1 nest
+    assert ncal.fundamentals.tau.shape == (17, 17)  # 16 rural + 1 nest
 
 
 def test_nest_with_lam_M_equal_lam_R_equals_the_flat_model(params):
@@ -140,7 +140,7 @@ def _path(nd, ncal, f_shock=None, imm=None, T=40):
     f = ncal.fundamentals
     return simulate(f, f_shock or f, P2, N0=ncal.baseline.N, x0=ncal.baseline.within.x,
                     immigration=np.zeros(T) if imm is None else imm,
-                    stop=ConsolidationStop(nd.rural, P2.epsilon, P2.ss_tol))  # fmt: skip
+                    rural=nd.rural)  # fmt: skip
 
 
 def test_no_shock_path_stays_at_baseline_with_a_nest(nd, ncal):
@@ -238,7 +238,7 @@ def test_path_re_sorts_inside_each_metro_separately():
     cal = calibrate(d, p)
     f1 = with_shocks(cal.fundamentals, core=d.core_mask, a_TH=p.a_TH, core_productivity_pct=10.0)
     path = simulate(cal.fundamentals, f1, p, N0=cal.baseline.N, x0=cal.baseline.within.x, immigration=np.zeros(15),
-                    stop=ConsolidationStop(d.rural, p.epsilon, p.ss_tol))  # fmt: skip
+                    rural=d.rural)  # fmt: skip
     assert path.all_converged
     t, w = 8, path.within[8]
     shares = np.exp(blocks.residence_log_shares(w.lnu, p.lam_R, d.nest, p.lam_M))

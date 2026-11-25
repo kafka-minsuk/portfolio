@@ -33,7 +33,7 @@ import numpy as np
 from .calibrate.invert import calibrate
 from .model import land
 from .model.analytic import two_location_check
-from .model.dynamics import ConsolidationStop, simulate
+from .model.dynamics import simulate
 from .model.equilibrium import SolveInfo, solve_static
 from .model.fundamentals import TRAVEL_SCOPES, with_shocks
 from .model.immigration import immigration_path
@@ -44,8 +44,8 @@ SYNTHETIC = "synthetic"
 REGION_FORMAT = 1
 
 SCENARIO_PARAMS = (
-    "alpha", "beta", "lam", "kappa_lam", "mu", "theta_T", "lam_R", "nu", "eta",
-    "price_rent_ratio", "epsilon", "varsigma", "land_income_in_choice", "lam_M_over_R",
+    "alpha", "beta", "lam", "kappa_lam", "mu", "theta_T", "lam_R", "tau0", "eta",
+    "price_rent_ratio", "varsigma", "land_income_in_choice", "lam_M_over_R",
 )  # fmt: skip
 DEFAULT_SHOCKS = {
     "core_productivity_pct": 10.0,
@@ -58,7 +58,7 @@ DEFAULT_SHOCKS = {
     "rural_amenity_pct": 0.0,
     "metro_target": "main",  # where the city shocks land: "main", "all", or a metro id from the region's metros
     "immigration_per_period": 0.0,
-    "periods": 60,
+    "periods": 400,
 }
 MAX_PERIODS = 400
 UNITS = {
@@ -249,8 +249,7 @@ def run(scenario: dict, region_doc: dict | None = None) -> dict:
     }
 
     # Path (§3.8): t = 0 baseline, shock from t = 1.
-    stop = ConsolidationStop(R, p.epsilon, p.ss_tol)
-    path = simulate(f0, f1, p, N0=base.N, x0=w0.x, immigration=imm, stop=stop)
+    path = simulate(f0, f1, p, N0=base.N, x0=w0.x, immigration=imm, rural=R)
     q = p.discount
     rho_t, r_t, wA_t = path.stack("rho"), path.stack("r"), path.stack("wA")
     P = np.vstack([w0.rho * land.gordon_multiple(q), land.present_values(rho_t[1:], q)])
@@ -264,7 +263,7 @@ def run(scenario: dict, region_doc: dict | None = None) -> dict:
     farm_wage = (wA_t[1:, R] @ w0.HA[R]) / w0.HA[R].sum()
     Nc = path.N[1:, core]
     core_income = (path.stack("ybar")[1:, core] * Nc).sum(axis=1) / Nc.sum(axis=1)  # resident-weighted
-    hold = np.ones(T)
+    hold = np.ones(path.N.shape[0] - 1)
 
     def wealth_pct(income, income0):
         new = land.household_wealth(acres, land_price(P[1]), income, q)
@@ -289,7 +288,7 @@ def run(scenario: dict, region_doc: dict | None = None) -> dict:
         "calibration": {
             "max_rel_error": cal.max_rel_error,
             "xi_A": f0.xi_A,
-            "solve": _merge([cal.wage_info, cal.flow_info, base.info], "ARSW wages + flow offsets + static check"),
+            "solve": _merge([cal.wage_info, base.info], "ARSW wages + static check"),
         },
         "long_run": {
             "N": lr.N,
@@ -303,15 +302,16 @@ def run(scenario: dict, region_doc: dict | None = None) -> dict:
             "solve": lr.info.as_dict(),
         },
         "path": {
-            "t": list(range(T + 1)),
+            "t": list(range(path.N.shape[0])),
             "N": path.N,
             "rural_share": path.N[:, R].sum(axis=1) / path.N.sum(axis=1),
             "land_per_worker_ratio": path.land_ratio,
-            "target_ratio": stop.target_ratio,
+            "utility_gap": path.utility_gap,
+            "gap_tol": p.gap_tol,
             "farmland_price_index": farmland_index,
             "urban_rent_index": urban_index,
             "stop": {"period": path.stop_period, "reason": path.stop_reason},
-            "all_converged": path.all_converged and cal.flow_info.converged,
+            "all_converged": path.all_converged,
             "worst_residual": path.worst_residual,
         },
         "wealth": {

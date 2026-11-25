@@ -1,11 +1,11 @@
-"""Exact model inversion (spec §5 steps 1-8)."""
+"""Exact model inversion (spec §5 steps 1-7)."""
 
 from dataclasses import dataclass
 
 import numpy as np
 
 from ..model import blocks, land
-from ..model.dynamics import calibrate_flow_offsets, migration_cost, unit_distances
+from ..model.dynamics import migration_cost, unit_distances
 from ..model.equilibrium import Equilibrium, SolveInfo, anderson, solve_static
 from ..model.fundamentals import Fundamentals
 from ..model.params import Params
@@ -18,7 +18,6 @@ class Calibration:
     baseline: Equilibrium
     max_rel_error: dict
     wage_info: SolveInfo
-    flow_info: SolveInfo
 
 
 def effective_wages(D, N, HU, HA, lam, *, tol=1e-13):
@@ -86,14 +85,12 @@ def calibrate(data: CountyData, p: Params) -> Calibration:
     A = np.exp(lnA - lnA.mean())
     lnu = blocks.expected_log_utility(A, r, ch.lnPhi, p)
     U_bar = float(np.exp(blocks.log_welfare(lnu, p.lam_R, nest, p.lam_M)))
-    # 8. flow offsets (per residence unit) so N is a steady state of the path.
-    unit, _, _ = blocks.outer_units(nest, Z)
+    # migration costs between residence units for the path (§3.8; the baseline is its steady state)
     tau = migration_cost(unit_distances(data.dist, nest, N), p)
-    delta, flow_info = calibrate_flow_offsets(np.bincount(unit, weights=N), blocks.unit_log_values(lnu, nest, p.lam_M), tau, p.nu)
 
     f = Fundamentals(
         A=A, B=B, A_farm=A_farm, L_bar=L_bar, TF=TF.astype(float), xi_A=xi_A, omega=omega.astype(float),
-        t=data.t.astype(float), tau=tau, delta=delta, gateway=data.gateway.astype(float),
+        t=data.t.astype(float), tau=tau, gateway=data.gateway.astype(float),
         U_bar=U_bar, N_bar0=float(N.sum()), nest=None if nest is None else np.asarray(nest),
     )  # fmt: skip
     base = solve_static(f, p, N0=N, x0=np.concatenate([np.log(r), np.log(np.where(farm, wA, 1.0))]))
@@ -106,4 +103,4 @@ def calibrate(data: CountyData, p: Params) -> Calibration:
     errors = {"HA": max(rel(w.HA, HA, farm), no_farm_err), "wA": rel(w.wA, wA, farm),
               "HU": rel(w.HU, HU), "N": rel(base.N, N)}  # fmt: skip
     errors = {k: errors[k] for k in ("HU", "HA", "wA", "N")}
-    return Calibration(f, base, errors, wage_info, flow_info)
+    return Calibration(f, base, errors, wage_info)

@@ -35,11 +35,11 @@ def test_default_run_shape(default_out):
     assert Z == 25
     assert sorted({c["kind"] for c in default_out["counties"]}) == ["core", "rural", "suburb"]
     path = default_out["path"]
-    T = api.default_scenario()["shocks"]["periods"]
-    assert path["t"] == list(range(T + 1))
-    assert len(path["N"]) == T + 1 and all(len(row) == Z for row in path["N"])
+    stop = path["stop"]
+    assert stop["reason"] == "utility_matched" and stop["period"] < api.default_scenario()["shocks"]["periods"]
+    assert path["t"] == list(range(stop["period"] + 1))  # the path ends where utility matches
+    assert len(path["N"]) == len(path["utility_gap"]) == stop["period"] + 1 and all(len(row) == Z for row in path["N"])
     assert path["N"][0] == pytest.approx([c["N0"] for c in default_out["counties"]], rel=1e-12)
-    assert path["stop"]["period"] in path["t"]
     assert path["land_per_worker_ratio"][0] == 1.0
     assert path["farmland_price_index"][0] == 1.0
     assert path["urban_rent_index"][0] == 1.0
@@ -64,7 +64,7 @@ def test_zero_shock_changes_nothing():
     assert all(abs(v) < 1e-7 for v in lr["totals"].values())
     assert abs(lr["welfare_pct"]) < 1e-8
     assert max(abs(v - 1.0) for v in out["path"]["farmland_price_index"]) < 1e-9
-    assert out["path"]["stop"] == {"period": 1, "reason": "steady_state"}
+    assert out["path"]["stop"] == {"period": 1, "reason": "utility_matched"}
     assert abs(out["wealth"]["stayer_pct"]) < 1e-8 and abs(out["wealth"]["leaver_pct"]) < 1e-8
 
 

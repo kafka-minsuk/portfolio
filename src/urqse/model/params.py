@@ -15,20 +15,19 @@ class Params:
     # Residence elasticity inside a metro nest relative to lam_R (spec §3.12); >= 1 for a nested
     # Frechet choice, 1 = the flat choice over counties and tracts.  # VERIFY: no estimate yet
     lam_M_over_R: float = 1.0
-    nu: float = 2.0  # dynamic-logit dispersion; 1/nu is the migration elasticity. source=spec §7
     eta: float = 0.0  # semi-closure; 0 = closed region. source=spec §12 decision 2
     price_rent_ratio: float = 36.0  # farmland price / cash rent. source=spec §3.10 (U.S. cropland 2025)
-    epsilon: float = 0.10  # consolidation target: land per farm worker >= (1+epsilon) x baseline. source=spec §12.1
     varsigma: float = 0.5  # share of landlord income paid to residents of the same county. source=none  # VERIFY
     land_income_in_choice: bool = False  # source=spec §12.1 (portability)
-    # Migration cost tau = tau0 + tau1 ln(distance km), tau_ii = 0 (spec §7 gives the form, not values).
-    # tau1 = nu makes the distance elasticity of gross flows equal to 1; tau0 is set so the synthetic
-    # state's baseline gross county-to-county move rate is about 4% per period.
-    tau0: float = 4.0  # source=placeholder until PPML on IRS SOI flows (M2)  # VERIFY
-    tau1: float = 2.0  # source=placeholder until PPML on IRS SOI flows (M2)  # VERIFY
+    # Migration cost tau = tau0 + tau1 ln(distance km), tau_ii = 0: residents of i meet homes in n at
+    # the rate exp(-tau_in) (spec §3.8). It sets the speed of the path, not where it ends. tau1 = 1 makes
+    # the distance elasticity of gross flows 1; tau0 is set so the synthetic state's baseline gross
+    # county-to-county move rate is about 3% per period.
+    tau0: float = 1.14  # source=placeholder until PPML on IRS SOI flows (M2)  # VERIFY
+    tau1: float = 1.0  # source=placeholder until PPML on IRS SOI flows (M2)  # VERIFY
     phi: float = 0.2  # partial adjustment of the regional total toward (S) on the path (§3.8); only used when eta > 0  # VERIFY
     a_TH: float = 0.371  # gross-output land + labour share a_T + a_H (0.151 + 0.22). source=spec §1.2 R2 (Suh & Moss 2021)
-    ss_tol: float = 1e-5  # path steady state: max |d ln N| per period below this
+    gap_tol: float = 1e-3  # the path stops once utility matches across regions to 0.1% (spec §12 decision 1)
 
     def __post_init__(self):
         checks = {
@@ -40,10 +39,9 @@ class Params:
             "lam_M_over_R >= 1 (nested residence choice, spec §3.12)": self.lam_M_over_R >= 1.0,
             "mu >= 0": self.mu >= 0.0,
             "kappa_lam >= 0": self.kappa_lam >= 0.0,
-            "nu > 0": self.nu > 0.0,
             "eta >= 0": self.eta >= 0.0,
             "price_rent_ratio > 0": self.price_rent_ratio > 0.0,
-            "epsilon >= 0": self.epsilon >= 0.0,
+            "gap_tol > 0": self.gap_tol > 0.0,
             "0 <= varsigma <= 1": 0.0 <= self.varsigma <= 1.0,
             "0 < phi <= 1": 0.0 < self.phi <= 1.0,
             "0 < a_TH <= 1": 0.0 < self.a_TH <= 1.0,

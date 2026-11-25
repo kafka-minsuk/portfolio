@@ -11,10 +11,10 @@ const START_REGION = "IA_2022";
 
 const DEFAULT_SCENARIO = {
   region: "synthetic",
-  params: { alpha: 0.75, beta: 0.8, lam: 6.8, kappa_lam: 0.08, mu: 0.5, theta_T: 0.40, lam_R: 3.0, nu: 2.0, eta: 0.0,
-            price_rent_ratio: 36.0, epsilon: 0.10, varsigma: 0.5, land_income_in_choice: false, lam_M_over_R: 1.0 },
+  params: { alpha: 0.75, beta: 0.8, lam: 6.8, kappa_lam: 0.08, mu: 0.5, theta_T: 0.40, lam_R: 3.0, tau0: 1.14, eta: 0.0,
+            price_rent_ratio: 36.0, varsigma: 0.5, land_income_in_choice: false, lam_M_over_R: 1.0 },
   shocks: { core_productivity_pct: 10.0, farm_tfp_pct: 0.0, travel_cut_pct: 0.0, travel_cut_scope: "into_core",
-            immigration_per_period: 0.0, periods: 60, core_floor_supply_pct: 0.0, core_amenity_pct: 0.0,
+            immigration_per_period: 0.0, periods: 400, core_floor_supply_pct: 0.0, core_amenity_pct: 0.0,
             metro_travel_cut_pct: 0.0, rural_amenity_pct: 0.0, metro_target: "main" },
 };
 
@@ -40,13 +40,13 @@ const PRESETS = [
   { group: "State", id: "highways", label: "Highway programme", shocks: { travel_cut_pct: 20, travel_cut_scope: "all" },
     help: "Every trip in the state gets 20% faster. More people can live in one county and work in another." },
   { group: "State", id: "immigration", label: "Immigration wave", shocks: () => ({ immigration_per_period: immigrationWave() }),
-    help: "International arrivals equal to 0.5% of the state's workers every period. Caveat: arrivals do not yet weigh places by size, so too many settle in small rural counties (flagged in the spec)." },
+    help: "International arrivals equal to 0.1% of the state's workers every period. They settle like residents do, tilted toward gateway counties." },
   { group: "State", id: "rural", label: "Rural revival", shocks: { rural_amenity_pct: 10 },
     help: "Rural counties become 10% more attractive places to live: broadband, clinics, schools." },
   { group: "State", id: "twin", label: "City and farm boom", shocks: { core_productivity_pct: 10, farm_tfp_pct: 10 },
     help: "Core productivity and farm productivity both rise 10%. Which pull wins?" },
 ];
-const IMMIGRATION_WAVE_SHARE = 0.005;
+const IMMIGRATION_WAVE_SHARE = 0.001;
 function immigrationWave() {
   const total = S.result && S.result.counties ? d3.sum(S.result.counties, c => c.N0) : 0;
   return Math.round((total || 100000) * IMMIGRATION_WAVE_SHARE / 100) * 100;
@@ -94,7 +94,7 @@ const SHOCK_CTL = [
   { key: "rural_amenity_pct", label: "Rural amenities", min: -20, max: 30, step: 1, fmt: v => pct(v, 0), help: "How attractive rural counties are as places to live." },
   { key: "immigration_per_period", label: "International immigrants per period", input: "number", min: 0, step: 100, fmt: int, help: "New arrivals settle like residents do." },
   { head: "Path" },
-  { key: "periods", label: "Periods", min: 10, max: 200, step: 5, fmt: int, help: "Length of the adjustment path." },
+  { key: "periods", label: "Periods (at most)", min: 10, max: 400, step: 10, fmt: int, help: "The path ends earlier once utility matches across regions." },
 ];
 const PARAM_CTL = [
   { key: "theta_T", label: "Land share in farming θ_T", min: 0.05, max: 0.7, step: 0.01, fmt: v => v.toFixed(2), help: "Higher means more diminishing returns to farm labour." },
@@ -102,9 +102,8 @@ const PARAM_CTL = [
   { key: "mu", label: "Floor-space supply elasticity μ", min: 0, max: 3, step: 0.05, fmt: v => v.toFixed(2) },
   { key: "lam_M_over_R", label: "Moving within the metro λ_M / λ_R", min: 1, max: 5, step: 0.1, fmt: v => v.toFixed(1), nested: true,
     help: "How much more readily people move between tracts than between counties. 1 = the same." },
-  { key: "nu", label: "Migration friction ν", min: 0.2, max: 6, step: 0.1, fmt: v => v.toFixed(1), help: "Higher means people relocate more slowly." },
+  { key: "tau0", label: "Moving cost τ₀", min: 0, max: 4, step: 0.05, fmt: v => v.toFixed(2), help: "Higher means people relocate more slowly. It changes the speed, not where the path ends." },
   { key: "eta", label: "Openness to the rest of the country η", min: 0, max: 5, step: 0.1, fmt: v => v.toFixed(1), help: "0 = closed region (the v1 setting)." },
-  { key: "epsilon", label: "Consolidation target ε", min: 0.01, max: 0.5, step: 0.01, fmt: v => "+" + Math.round(v * 100) + "%", help: "Stop when farmland per farm worker rises this much." },
   { key: "price_rent_ratio", label: "Farmland price / rent ratio", min: 10, max: 60, step: 1, fmt: v => v.toFixed(0) },
   { key: "varsigma", label: "Landlord income kept in county ς", min: 0, max: 1, step: 0.05, fmt: v => Math.round(v * 100) + "%" },
   { key: "land_income_in_choice", label: "Land income affects where people live", check: true, help: "Off by default: land income is portable wealth." },
@@ -630,9 +629,8 @@ function drawTable(r) {
 
 // ------------------------------------------------------------------ change since start (the path settles within a few periods)
 const STOP_TEXT = {
-  consolidation: p => `Consolidation target reached at period ${p}`,
-  steady_state: p => `Steady state at period ${p}, before the consolidation target`,
-  horizon: p => `Reached the horizon at period ${p} without consolidating`,
+  utility_matched: (p, gap) => `Utility matched across regions at period ${p} (within ${(gap * 100).toFixed(2)}%)`,
+  horizon: (p, gap) => `Reached the horizon at period ${p}; utility still differs across regions by ${(gap * 100).toFixed(2)}%`,
 };
 
 // first period by which a series has made 90% of its move from period 0 to the last period
@@ -644,10 +642,9 @@ function settledBy(v) {
 
 function drawChange(r) {
   const P = r.path, t = P.t, stop = P.stop || {}, last = t.length - 1;
-  $("stopLine").textContent = stop.period != null ? STOP_TEXT[stop.reason]?.(stop.period) ?? `Stopped at period ${stop.period}` : "The path did not stop";
-  const target = `target ${pct((P.target_ratio - 1) * 100, 0)} (ε)`;
+  $("stopLine").textContent = stop.period != null ? STOP_TEXT[stop.reason]?.(stop.period, P.utility_gap[stop.period]) ?? `Stopped at period ${stop.period}` : "The path did not stop";
   const cells = [
-    { k: "Farmland per farm worker", sub: `rural counties, ${target}`, v: P.land_per_worker_ratio, fmt: d3.format(".3f"), chg: v => pct((v.at(-1) / v[0] - 1) * 100, 2) },
+    { k: "Farmland per farm worker", sub: "rural counties, an outcome", v: P.land_per_worker_ratio, fmt: d3.format(".3f"), chg: v => pct((v.at(-1) / v[0] - 1) * 100, 2) },
     { k: "Rural share of residents", sub: "percentage points", v: P.rural_share.map(x => x * 100), fmt: x => x.toFixed(2) + "%", chg: v => signed(v.at(-1) - v[0], 2) + " pp" },
     { k: "Farmland price", sub: "index, start = 1", v: P.farmland_price_index, fmt: d3.format(".3f"), chg: v => pct((v.at(-1) / v[0] - 1) * 100, 2) },
     { k: "Urban floor rent", sub: "index, start = 1", v: P.urban_rent_index, fmt: d3.format(".3f"), chg: v => pct((v.at(-1) / v[0] - 1) * 100, 2) },

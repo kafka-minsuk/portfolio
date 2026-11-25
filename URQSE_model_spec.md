@@ -58,8 +58,8 @@ Built from: *Model_ver3.docx* (the proposal), Ravallion, Chen & Sangraula (2007,
 
 1. **Unit of analysis:** counties within one state (or region). U.S. states have roughly 3–254 counties. The dense $Z\times Z$ engine runs at **0.35 s for 100 locations, 6.9 s for 400** (static solve with semi-closure, reference code). An optional sub-county grid is supported via a sparse commuting cutoff (§6.4).
 2. **Satellite data enter as measurement of states**, not as live inputs. Population, built volume, cropland and suitability are preprocessed into county tables offline (§8).
-3. **Long run vs. path:** a static equilibrium (where things end up) and a dynamic path (how fast and in what order). The path stops when a user-defined rural land–labour condition is met.
-4. **Semi-closed:** the region's total population responds to its welfare with elasticity $\eta$. Inside the region, residence responds with $\lambda_R$ (long run) or flow parameters $(\nu,\tau)$ (path).
+3. **Long run vs. path:** a static equilibrium (where things end up) and a dynamic path (how fast and in what order). The path stops when utility matches across regions, which is the long run.
+4. **Semi-closed:** the region's total population responds to its welfare with elasticity $\eta$. Inside the region, residence responds with $\lambda_R$ (long run) in the long run and on the path alike; migration costs $\tau$ set only the speed of the path.
 5. **Every block is closed form except two fixed points** (wages/rents given residents; residents given utilities).
 
 ---
@@ -169,32 +169,28 @@ Given fundamentals $\{A,b,\tilde A,\underline{L},T^F,\xi_A,t\}$ and parameters, 
 
 ### 3.8 Dynamics (the path)
 
-Each period $t$: solve the within-period block (§3.2–3.5) given $N_t$, giving $\ln u_{nt}$. Then residents relocate by dynamic logit flows (Artuç–Chaudhuri–McLaren; Caliendo–Dvorkin–Parro):
+Each period $t$: solve the within-period block (§3.2–3.5) given $N_t$, giving $\ln u_{nt}$. Then residents relocate. A resident of $i$ comes across a home in $n$ at the rate $m_{in}=e^{-\tau_{in}}$ and moves there if it is better for them, by a binary logit with the long-run residence elasticity:
 
 $$
-\mu_{in,t}=\frac{\exp\!\big((\ln u_{nt}+\delta_n-\tau_{in})/\nu\big)}{\sum_m\exp\!\big((\ln u_{mt}+\delta_m-\tau_{im})/\nu\big)},\qquad
-N_{n,t+1}=\sum_i\mu_{in,t}N_{it}\;(+\text{semi-closed inflow}).
+\mu_{in,t}=m_{in}\,\frac{1}{1+\exp\!\big(-\lambda_R(\ln u_{nt}-\ln u_{it})\big)}\ (n\ne i),\qquad
+\mu_{ii,t}=1-\sum_{n\ne i}\mu_{in,t},\qquad
+N_{n,t+1}=\sum_i\mu_{in,t}N_{it}\;(+\text{arrivals}).
 $$
 
-- $\tau_{in}$: migration cost (distance-based; $\tau_{ii}=0$). $1/\nu$: migration elasticity.
-- $\delta_n$ are **calibrated so that the observed $N$ is a steady state** (reference: `calibrate_flows`). Without this step the baseline drifts with no shock. This matters because the static amenities are calibrated for $\lambda_R$, not $(\nu,\tau)$.
-- v1 uses **myopic** agents (value = current $\ln u$). v2 uses forward-looking values $v_{nt}=\ln u_{nt}+\nu\ln\sum_m\exp((\beta v_{m,t+1}-\tau_{nm})/\nu)$, solved by **dynamic hat algebra** (CDP 2019) with observed gross flows. That removes the need to know $\tau$ and $\delta$ separately.
+- $\tau_{in}=\tau_0+\tau_1\ln d_{in}$ is symmetric, $\tau_{ii}=0$; $m$ is scaled down only if a row would sum above 1.
+- **The path ends at the long run.** Because $m$ is symmetric and the acceptance ratio is $\mu_{in}/\mu_{ni}=(u_n/u_i)^{\lambda_R}$, the flows satisfy detailed balance exactly where $N_n\propto u_n^{\lambda_R}$, which is (S). So the steady state of the path *is* the static equilibrium: utility matches across regions in the Fréchet sense (the marginal mover is indifferent). $(\tau_0,\tau_1)$ set only how fast people get there and the distance pattern of gross flows, never where they end up. The calibrated baseline is a steady state with no extra offsets.
+- **Utility gap** $G_t=\max_n g_{nt}-\min_n g_{nt}$ with $g_{nt}=\ln u_{nt}-\ln N_{nt}/\lambda_R$, in log utility. (S) makes $g$ equal everywhere, so $G=0$ in the long run. With $\eta>0$, $G$ also includes the gap to the outside, $|\ln W_t-\ln\bar U-\ln(\bar N_t/\bar N_0)/\eta|$.
+- v1 uses **myopic** agents (value = current $\ln u$). v2 uses forward-looking values $v_{nt}=\ln u_{nt}+\nu\ln\sum_m\exp((\beta v_{m,t+1}-\tau_{nm})/\nu)$, solved by **dynamic hat algebra** (CDP 2019) with observed gross flows.
 - Semi-closed inflow: $\bar N_{t+1}=\bar N_t\,(\bar N^*_t/\bar N_t)^{\phi}$ with partial adjustment $\phi$ toward the target in (S).
 
 ### 3.9 "Until the countryside has enough people for the extra land"
 
 Your phrasing allows two readings. Both are supported, and the app should let the user pick:
 
-- **(a) Consolidation reading.** Rural people leave until farmland per farm worker $T^F/H_A$ rises to a target (enough land each).
+- **(a) Consolidation reading.** Rural people leave, so farmland per farm worker $T^F/H_A$ rises (more land each).
 - **(b) Frontier reading.** Rural labour grows until there are enough workers to bring extra suitable land into cultivation.
 
-**Stopping rule** (both readings): stop the path at the first $t$ where
-
-$$
-\frac{\sum_{n\in\mathcal R}T^F_{n}}{\sum_{n\in\mathcal R}H_{An,t}}\ \gtrless\ (1\pm\varepsilon)\times\text{baseline},
-$$
-
-or when the frontier binds ($T^F_n=\bar T^F_n$ in a share of rural counties), or at steady state.
+**Stopping rule** (decision 12.1, revised 2026-11-25): stop the path at the first $t\ge1$ with utility gap $G_t<$ `gap_tol` (0.1% by default), that is, once utility matches across regions; otherwise at the horizon, which reports the remaining $G$. Consolidation, $\sum_{\mathcal R}T^F/\sum_{\mathcal R}H_{A,t}$ relative to baseline, is reported along the path as an **outcome**, not a target: the mechanism is that people leaving the countryside raise land per remaining worker and so rural income, which slows the outflow until utility matches. Reading (b) would add "the frontier binds" as an outcome to report.
 
 **Extensive land margin** (needed for reading b; spec only, not in reference v1): plots in county $n$ have quality $q\sim\text{Pareto}(q_{\min},k)$ on suitable area $\bar T^F_n$ (from FAO GAEZ / USDA soil productivity indices). A plot is farmed if $q\,\tilde\rho_n\ge c_n$ (a per-hectare fixed cost). Then
 
@@ -246,7 +242,7 @@ $$
 $u_{c'}^{\lambda_R}$ in the denominators runs over non-metro counties and every metro's $u_M^{\lambda_R}$.
 $W$ is (S) over non-metro counties and the metros. $\lambda_M=\lambda_R$ is the flat choice over counties and tracts.
 **Calibration** (§5 step 7): $\ln A_k=\frac{\ln N_k}{\lambda_M}+\ln N_M\big(\frac1{\lambda_R}-\frac1{\lambda_M}\big)+(1-\alpha)\ln r_k-\frac{\ln\Phi_k}{\lambda}$.
-**Path** (§3.8): flows, flow offsets $\delta$ and arrivals act on residence units (non-metro counties
+**Path** (§3.8): flows and arrivals act on residence units (non-metro counties
 and each metro as a whole); migration costs into and out of the metro use resident-weighted distances
 (`# VERIFY`). Inside each metro, residents re-sort to (S') every period (moving within a metro is fast).
 With $\lambda_M=\lambda_R$ the long run equals the flat model, but the path differs: a metro moves as one
@@ -318,9 +314,7 @@ Three lessons for the paper design:
 5. **Over-identification test:** model farmland rent $\rho_j=\frac{\theta_T}{\theta_H}\frac{w_{Aj}H_{Aj}}{T^F_j}$ against **NASS county cash rents**. Alternatively, estimate $\theta_T$ county by county from this ratio, which is a cleaner use of data than any published elasticity.
 6. **Farm productivity:** $\tilde A_j=w_{Aj}(H_{Aj}/T^F_j)^{\theta_T}/\theta_H$.
 7. **Amenities** from (S): $\ln A_i=\frac{1}{\lambda_R}\ln N_i+(1-\alpha)\ln r_i-\frac1\lambda\ln\Phi_i$ (normalised). Set $\bar U=W$ so the baseline is an equilibrium for any $\eta$.
-8. **Flow offsets** $\delta$ (for the path): iterate $\delta\leftarrow\delta+\nu(\ln N-\ln \mu(\delta)^\top N)$ until $N$ is stationary.
-
-All of this is closed form except steps 1 and 8. The reference code reproduces jobs, farm wages and residents to $10^{-7}$ relative or better.
+All of this is closed form except step 1. The path needs no calibration step of its own: the baseline is its steady state (§3.8). The reference code reproduces jobs, farm wages and residents to $10^{-7}$ relative or better.
 
 **Counterfactuals:** prefer **exact hat algebra**. Write the equilibrium in changes $\hat x=x'/x$. A travel-time change enters as $\hat d_{ij}=e^{-\kappa\Delta t_{ij}}$, and only baseline shares ($\pi_{js|i}$, expenditure shares) are needed. Unobservable levels never enter, so measurement error in $A,b$ doesn't contaminate the counterfactual.
 
@@ -392,13 +386,13 @@ Memory and time are dominated by the $Z\times Z\times 2$ choice tensor. For a su
 | $\mu$ floor supply | 0.5 | about 0.5 floor space / 0.3 units on average across U.S. urban tracts (Baum-Snow & Han 2024); higher exurban and rural | Tract-level BSH estimates aggregated to county |
 | $\theta_T$ land share (farm VA net of K, X) | 0.40 | 0.15/(0.15+0.22) from USDA-ERS shares in Suh & Moss | **County cash rents** (§5 step 5) |
 | $\lambda_R$ residence elasticity | 3 | long-run county mobility elasticities are small single digits | IRS SOI county flows |
-| $\nu,\tau$ flows | 2, $\tau=\tau_0+\tau_1\ln d$ | ACM/CDP framework | PPML gravity on IRS gross flows |
+| $\tau$ migration costs | $\tau=\tau_0+\tau_1\ln d$, $\tau_0=1.14$, $\tau_1=1$ (`# VERIFY`: set for a ~3% gross county move rate) | speed of the path only (§3.8) | PPML gravity on IRS gross flows |
 | $\eta$ semi-closure | 1 (sweep 0–5) | the key unknown; §4 shows it dominates | state-level net in-migration vs. welfare shocks (shift-share) |
 | $i-g$ (land discount) | from price/rent | U.S. cropland price/rent ≈ 36 in 2025, i.e. ≈ 2.8% | NASS county land values & rents |
 | $\gamma_B$ agglomeration | 0 (option 0.03–0.07) | ARSW and the urban literature | leave off unless needed; check uniqueness |
 | $k$ plot-quality Pareto shape | 3 | — | within-county dispersion of soil productivity (SSURGO/NCCPI or GAEZ) |
 
-**On "updated distributions":** keep **Fréchet** for location choice. Nothing more recent beats it for closed-form gravity, and its logsum gives the welfare measure. The modern updates are elsewhere: (i) **two elasticities** ($\lambda$ for jobs, $\lambda_R$ or $1/\nu$ for residence) instead of one; (ii) **dynamic logit (Gumbel) flows** for the path; (iii) a **Pareto plot-quality** distribution for the land frontier (closed form, §3.9); (iv) the **selection-aware** reading of the farm gap ($\xi_A$). If you need correlated tastes across nearby counties, use a nested Fréchet (cross-nested by commuting zone) with a nesting parameter.
+**On "updated distributions":** keep **Fréchet** for location choice. Nothing more recent beats it for closed-form gravity, and its logsum gives the welfare measure. The modern updates are elsewhere: (i) **two elasticities** ($\lambda$ for jobs, $\lambda_R$ for residence) instead of one; (ii) **logit flows** for the path whose steady state is the long run; (iii) a **Pareto plot-quality** distribution for the land frontier (closed form, §3.9); (iv) the **selection-aware** reading of the farm gap ($\xi_A$). If you need correlated tastes across nearby counties, use a nested Fréchet (cross-nested by commuting zone) with a nesting parameter.
 
 ---
 
@@ -417,7 +411,7 @@ Memory and time are dominated by the $Z\times Z\times 2$ choice tensor. For a su
 | $\rho_n$ cash rents, land values | NASS county cash rents; NASS land values | — | over-identification test and asset-price calibration |
 | Housing prices/rents | FHFA county HPI, Zillow, ACS gross rent | — | urban asset-price validation |
 | Price levels | BEA Regional Price Parities | — | validation of $r$ |
-| Migration flows | IRS SOI county-to-county, ACS flows | — | $\nu,\tau$, dynamic hat algebra |
+| Migration flows | IRS SOI county-to-county, ACS flows | — | $\tau$, dynamic hat algebra |
 
 Other data-rich targets with the same schema: EU NUTS-3 (Eurostat, LUCAS, CORINE/Copernicus), UK (ONS census OD, LSOA), Korea 시군구 (KOSIS 인구이동, 국토부 실거래가, 농업면적조사), Japan.
 
@@ -474,7 +468,7 @@ urqse/
 | ✓ transport cut raises welfare, closed population fixed | $W'>W$, $\sum N'=\sum N$ |
 | ✓ semi-closure nests limits | $\eta=0$ ⇒ $\bar N$ fixed; $\bar N$ increasing in $\eta$ |
 | ✓ two-location closed form | §4 formula vs. full solver (rel. error < 0.2%) |
-| ✓ flow steady state + stop rule | no-shock path stays at baseline; the stop rule fires |
+| ✓ path ends at the long run | no-shock path stays at baseline; a shocked path stops when utility matches, at the static equilibrium; $\tau$ changes the stop period, not the end; every state closes its utility gap |
 | ✓ Gordon terminal value | constant rent ⇒ $P=\rho(1+g)/(i-g)$ |
 | hat algebra zero shock | $\hat x\equiv1$ |
 | hat algebra = level solve | same counterfactual both ways |
@@ -490,7 +484,7 @@ urqse/
 ## 11. Roadmap
 
 1. **M1 (static core):** the reference code → package, Iowa data build, calibration report, static counterfactuals. *Exit: inversion and over-ID checks on real data.*
-2. **M2 (estimation):** PPML for $\kappa\lambda$ (LODES) and $\nu,\tau$ (IRS); $\theta_T$ from cash rents; $\eta$ sensitivity.
+2. **M2 (estimation):** PPML for $\kappa\lambda$ (LODES) and $\tau$ (IRS); $\theta_T$ from cash rents; $\eta$ sensitivity.
 3. **M3 (path + land):** flow dynamics, stop rules, Pareto frontier, Capozza–Helsley conversion.
 4. **M4 (assets):** price paths, ownership options, validation against NASS land values and FHFA.
 5. **M5 (hat algebra + JAX):** fast counterfactuals, dynamic hat algebra, uniqueness checks.
@@ -501,7 +495,7 @@ urqse/
 
 ## 12. Decisions (resolved, v1.1)
 
-1. **Stop rule = consolidation (reading a).** Stop at the first $t$ with $\sum_{\mathcal R}T^F/\sum_{\mathcal R}H_{A,t}\ \ge (1+\varepsilon)\times$ baseline, or at steady state. The extensive frontier (§3.9 b) is deferred.
+1. **Stop rule = utility matches (revised 2026-11-25).** Stop at the first $t$ with utility gap $G_t<$ `gap_tol` (§3.8, §3.9), else at the horizon. Consolidation is an outcome, not a target. Before this the path stopped when $\sum_{\mathcal R}T^F/\sum_{\mathcal R}H_{A,t}\ge(1+\varepsilon)\times$ baseline or when a period's moves fell below a threshold, which could end it with utility still unequal. The extensive frontier (§3.9 b) is deferred.
 2. **No domestic inflow:** $\eta=0$. The region exchanges no people with the rest of the country. **External (international) immigration** is an exogenous scenario path $I_t\ge0$, allocated by §12.2.
 3. **Land: independent owner-operators plus landlords**, with county tenure shares (§12.1).
 4. First state: Iowa (then Kansas, Nebraska).
@@ -524,7 +518,7 @@ Each county has an owner-operated share $\omega_n$ of farmland (Census of Agricu
 
 ### 12.2 External immigration
 
-$\bar N_{t+1}=\bar N_t+I_t$. New arrivals choose a county by the same residence logit as natives, with an optional gateway shifter $g_n$ (weights from ACS foreign-born recent arrivals): $\Pr(n)\propto g_n\exp((\ln u_{nt}+\delta_n)/\nu)$. Natives' flows (§3.8) are unchanged. The static long run solves (S) with $\eta=0$ and $\bar N=\bar N_0+\sum I$.
+$\bar N_{t+1}=\bar N_t+I_t$. New arrivals choose a county by the same residence logit as natives, with an optional gateway shifter $g_n$ (weights from ACS foreign-born recent arrivals): $\Pr(n)\propto g_n u_{nt}^{\lambda_R}$ (the residence logit of (S), over residence units). Natives' flows (§3.8) are unchanged. The static long run solves (S) with $\eta=0$ and $\bar N=\bar N_0+\sum I$.
 
 ---
 
@@ -538,6 +532,14 @@ $\bar N_{t+1}=\bar N_t+I_t$. New arrivals choose a county by the same residence 
   choose a residence unit without weighting by its size, so they over-weight small units.
 - **2026-11-25.** §3.12: every Metropolitan Statistical Area is a nest (multi-polar); city shocks take a
   metro target. Path flows now move metros as units in every state.
+
+- **2026-11-25.** §3.8, §3.9, decision 12.1: the path ends at the long run. Residents meet homes at a
+  symmetric distance-based rate and move by a binary logit at $\lambda_R$, so the steady state is (S);
+  the path stops when the utility gap across regions is below 0.1% (`Params.gap_tol`), or at the
+  horizon. Consolidation is reported, not targeted. Removed: $\varepsilon$, $\nu$, the flow offsets
+  $\delta$ (§5 step 8) and the step-size steady-state test. $\tau_0$ re-set to 1.14, $\tau_1$ to 1
+  (same ~3% gross move rate). Immigrant arrivals now follow $g_n u_n^{\lambda_R}$, which weights
+  places by size and closes the §12.2 `# VERIFY`. Default horizon 400 periods.
 
 ---
 

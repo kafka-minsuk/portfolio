@@ -199,8 +199,7 @@ def write_report(r, out_dir: Path):
           f"converged={bi.converged}, residual {bi.residual_inf:.1e} | "
           f"{e['HU']:.1e} / {e['HA']:.1e} / {e['wA']:.1e} / {e['N']:.1e} |")
     w(f"\nLargest relative error of the calibrated fundamentals against jobs, farm wages and residents: "
-      f"{max(r['cal'].max_rel_error.values()):.1e} (bar 1e-7). Flow offsets: converged={r['cal'].flow_info.converged}, "
-      f"residual {r['cal'].flow_info.residual_inf:.1e}.\n")
+      f"{max(r['cal'].max_rel_error.values()):.1e} (bar 1e-7).\n")
 
     w("## 2. Farm-job wedge xi_A\n")
     w(f"![xi_A map]({map_name})\n")

@@ -29,3 +29,8 @@ def test_region_default_converges_under_the_web_gate(region):
     for solve in (out["calibration"]["solve"], out["long_run"]["solve"]):
         assert solve["converged"] and solve["residual_inf"] <= GATE_TOL
     assert out["path"]["all_converged"] and out["path"]["worst_residual"] <= GATE_TOL
+    # the path closes the utility gap: matched (0.1%), or nearly so at the horizon in states whose
+    # counties are far apart (Nevada: 2.4% left after 400 periods)
+    P = out["path"]
+    gap = P["utility_gap"][P["stop"]["period"]]
+    assert gap < 0.03 and (P["stop"]["reason"] == "utility_matched") == (gap < P["gap_tol"])

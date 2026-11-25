@@ -35,7 +35,7 @@ def test_baseline_is_the_equilibrium_from_a_perturbed_start(data, eta):
 
 def test_calibration_report_has_errors_below_tolerance(cal):
     assert all(err < 1e-7 for err in cal.max_rel_error.values())
-    assert cal.wage_info.converged and cal.flow_info.converged and cal.baseline.info.converged
+    assert cal.wage_info.converged and cal.baseline.info.converged
 
 
 def test_land_income_outside_choice_leaves_choice_side_unchanged(data):

@@ -16,7 +16,6 @@ class Fundamentals:
     omega: np.ndarray  # owner-operated share of farmland (§12.1)
     t: np.ndarray  # travel time in minutes, (Z, Z)
     tau: np.ndarray  # migration cost between residence units (§3.12; zones when there is no nest), zero diagonal
-    delta: np.ndarray  # flow offsets per residence unit making the baseline a steady state (§5 step 8)
     gateway: np.ndarray  # immigrant gateway weights g_n (§12.2)
     U_bar: float  # reference utility in (S)
     N_bar0: float  # baseline regional population
